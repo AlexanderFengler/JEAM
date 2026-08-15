@@ -5,6 +5,7 @@
 .ruff_cache/
 .venv/
 .ipynb_checkpoints/
+notebooks/__marimo__/
 __pycache__/
 coverage.xml
 dist/
