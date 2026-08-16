@@ -78,6 +78,14 @@ jobs:
       - name: Check formatting
         run: uv run ruff format --check .
 
+      - name: Check the diagnostic notebook
+        run: uv run marimo check --strict notebooks/jeam_failure_laboratory.py
+
+      - name: Execute the diagnostic notebook headlessly
+        run: >-
+          uv run marimo export html notebooks/jeam_failure_laboratory.py
+          --output /tmp/jeam-failure-laboratory.html
+
       - name: Build documentation
         run: uv run mkdocs build
 

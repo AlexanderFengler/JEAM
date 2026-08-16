@@ -1,0 +1,4 @@
+graft notebooks
+graft tests
+prune notebooks/__marimo__
+global-exclude __pycache__ *.py[cod]
