@@ -19,7 +19,6 @@ PROJECTED_MODEL_CASES = [
         ProjectedSphericalDiffusionModel,
         np.array([pi / 6, 2 * pi / 3]),
         2.0,
-        (2 * pi) ** 1.5,
         id="psdm",
     ),
     pytest.param(
@@ -27,7 +26,6 @@ PROJECTED_MODEL_CASES = [
         ProjectedHyperSphericalDiffusionModel,
         np.array([[pi / 6, pi / 4], [2 * pi / 3, pi / 3]]),
         pi,
-        4 * pi**2,
         id="phsdm",
     ),
 ]
@@ -40,22 +38,17 @@ def _projected_coordinate_jacobian(dimension: int, angles: np.ndarray) -> np.nda
     return np.sin(angles[:, 0]) ** 2 * np.sin(angles[:, 1])
 
 
-@pytest.mark.xfail(
-    reason="projected models omit dimensional constants and response Jacobians",
-    strict=True,
-)
 @pytest.mark.parametrize(
     (
         "dimension",
         "model_type",
         "angles",
         "_response_jacobian_integral",
-        "audited_bad_mass",
     ),
     PROJECTED_MODEL_CASES,
 )
 def test_projected_density_uses_exposed_response_coordinates(
-    dimension, model_type, angles, _response_jacobian_integral, audited_bad_mass
+    dimension, model_type, angles, _response_jacobian_integral
 ):
     decision_times = np.array([0.2, 0.8])
     observed = np.exp(
@@ -75,30 +68,20 @@ def test_projected_density_uses_exposed_response_coordinates(
         * coordinate_jacobian
     )
 
-    np.testing.assert_allclose(
-        observed / expected * coordinate_jacobian,
-        audited_bad_mass,
-        rtol=2e-9,
-    )
     np.testing.assert_allclose(observed, expected, rtol=2e-9, atol=1e-15)
 
 
-@pytest.mark.xfail(
-    reason="projected zero-drift masses are (2*pi)^1.5 and 4*pi^2, not one",
-    strict=True,
-)
 @pytest.mark.parametrize(
     (
         "dimension",
         "model_type",
         "_angles",
         "response_jacobian_integral",
-        "audited_bad_mass",
     ),
     PROJECTED_MODEL_CASES,
 )
 def test_projected_density_integrates_to_one(
-    dimension, model_type, _angles, response_jacobian_integral, audited_bad_mass
+    dimension, model_type, _angles, response_jacobian_integral
 ):
     decision_times = np.linspace(1e-6, 12.0, 30_000)
     if dimension == 3:
@@ -122,5 +105,42 @@ def test_projected_density_integrates_to_one(
         decision_times[1] - decision_times[0], multiplier=0.25, floor=1e-5
     )
 
-    assert mass == pytest.approx(audited_bad_mass, abs=tolerance)
     assert mass == pytest.approx(1.0, abs=tolerance)
+
+
+@pytest.mark.parametrize(
+    ("model_type", "polar_angles", "drift_dimension"),
+    [
+        pytest.param(
+            ProjectedSphericalDiffusionModel,
+            np.array([0.0, pi]),
+            2,
+            id="psdm",
+        ),
+        pytest.param(
+            ProjectedHyperSphericalDiffusionModel,
+            np.array(
+                [
+                    [0.0, pi / 2],
+                    [pi, pi / 2],
+                    [pi / 2, 0.0],
+                    [pi / 2, pi],
+                ]
+            ),
+            3,
+            id="phsdm",
+        ),
+    ],
+)
+def test_projected_coordinate_density_vanishes_at_poles(
+    model_type, polar_angles, drift_dimension
+):
+    log_density = model_type().joint_lpdf(
+        rt=np.full(polar_angles.shape[0], 0.5),
+        theta=polar_angles,
+        drift_vec=np.zeros(drift_dimension),
+        ndt=0.0,
+        threshold=1.0,
+    )
+
+    assert np.all(np.exp(log_density) < np.finfo(np.float64).eps)
