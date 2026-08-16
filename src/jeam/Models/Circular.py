@@ -4,7 +4,7 @@ from scipy.special import iv
 
 from ..utility.helpers import trapz_1d
 from ..utility.simulators import simulate_CDM_trial, simulate_custom_threshold_CDM_trial
-from ..utility.fpts import cdm_short_t_fpt_z, cdm_short_t_log_fpt_z, cdm_long_t_fpt_z, ie_fpt_linear, ie_fpt_exponential, ie_fpt_hyperbolic, ie_fpt_custom
+from ..utility.fpts import cdm_short_t_fpt_z, cdm_short_t_log_fpt_z, cdm_long_t_fpt_z, cdm_long_t_fpt_z_roundoff_bound, ie_fpt_linear, ie_fpt_exponential, ie_fpt_hyperbolic, ie_fpt_custom
 from ..utility.validation import fixed_fpt_log_density, normalize_fixed_single_angle_likelihood_inputs, normalize_log_density_floor, validate_fixed_log_density
 
 class CircularDiffusionModel:
@@ -230,6 +230,22 @@ class CircularDiffusionModel:
                 s = tt/threshold**2
                 w = np.minimum(np.maximum((s - s0) / (s1 - s0), 0), 1)
                 fpt_lt = cdm_long_t_fpt_z(tt, threshold, sigma=sigma)
+                fpt_lt_roundoff_bound = cdm_long_t_fpt_z_roundoff_bound(
+                    tt,
+                    threshold,
+                    sigma=sigma,
+                )
+                # The alternating long-time series is unresolved at the early
+                # edge of the overlap. Fade it in over two decades of signal above
+                # its conservative roundoff bound instead of treating cancellation
+                # residue as density.
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    fpt_lt_signal_to_error = np.maximum(fpt_lt, 0) / fpt_lt_roundoff_bound
+                    fpt_lt_reliability = np.clip(
+                        np.log(fpt_lt_signal_to_error) / np.log(100),
+                        0,
+                        1,
+                    )
                 scaled_tt = sigma**2 * tt/threshold**2
                 log_fpt_st = np.zeros_like(tt)
                 log_fpt_st[positive_density_support] = (
@@ -245,6 +261,7 @@ class CircularDiffusionModel:
                     w,
                     positive_density_support,
                     model_name="CDM",
+                    long_density_weight=fpt_lt_reliability,
                 )
             else:
                 T = np.arange(0, tt.max()+0.05, 0.05)

@@ -210,11 +210,24 @@ def fixed_fpt_log_density(
     computation_mask: NDArray[np.bool_],
     *,
     model_name: str,
+    long_density_weight: FloatArray | None = None,
 ) -> FloatArray:
-    """Combine fixed-model FPT branches while preserving short-time log mass."""
+    """Combine fixed-model FPT branches while preserving short-time log mass.
+
+    ``long_density_weight`` may fade an unresolved alternating series out of the
+    overlap. It does not suppress non-finite intermediates, which remain numerical
+    failures.
+    """
     short_log_density = np.asarray(short_log_density)
     long_density = np.asarray(long_density)
     blend_weight = np.asarray(blend_weight)
+    if long_density_weight is None:
+        long_density_weight = np.ones_like(short_log_density, dtype=np.float64)
+    else:
+        long_density_weight = np.asarray(
+            long_density_weight,
+            dtype=np.float64,
+        )
     log_density = np.zeros_like(short_log_density, dtype=np.float64)
 
     short_only = computation_mask & (blend_weight == 0)
@@ -256,10 +269,14 @@ def fixed_fpt_log_density(
     # The truncated long-time series is known to oscillate slightly below zero
     # before its reliable region. In that overlap only, fall back to the valid
     # short-time approximation instead of manufacturing a finite density floor.
-    stable_blended_density = np.where(
+    positive_blended_density = np.where(
         blended_density > 0,
         blended_density,
         blended_short_density,
+    )
+    stable_blended_density = (
+        (1 - long_density_weight[blended]) * blended_short_density
+        + long_density_weight[blended] * positive_blended_density
     )
     log_density[blended] = np.log(stable_blended_density)
     log_density[long_only] = np.log(long_only_density)
