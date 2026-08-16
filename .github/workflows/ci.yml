@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install JEAM and test dependencies
+        run: uv sync --group test --locked
+
+      - name: Run tests
+        run: uv run pytest
+
+  integration:
+    name: Quality, docs, and package build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Verify the lockfile
+        run: uv lock --check
+
+      - name: Install all development dependencies
+        run: uv sync --all-groups --all-extras --locked
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Check the diagnostic notebook
+        run: uv run marimo check --strict notebooks/jeam_failure_laboratory.py
+
+      - name: Execute the diagnostic notebook headlessly
+        run: >-
+          uv run marimo export html notebooks/jeam_failure_laboratory.py
+          --output /tmp/jeam-failure-laboratory.html
+
+      - name: Build documentation
+        run: uv run mkdocs build
+
+      - name: Build source and wheel distributions
+        run: uv build --python 3.12
+
+      - name: Smoke-test the built wheel
+        run: >-
+          uv run --python 3.12 --isolated --no-project --with ./dist/jeam-*.whl
+          python -c "from importlib.metadata import version; import jeam;
+          assert jeam.__version__ == version('jeam');
+          assert not jeam.load_kvam2019().empty"

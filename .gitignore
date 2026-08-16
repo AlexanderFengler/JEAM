@@ -1,9 +1,16 @@
 *.egg-info/
+.coverage
 .DS_Store
+.pytest_cache/
+.ruff_cache/
+.venv/
 .ipynb_checkpoints/
+notebooks/__marimo__/
 __pycache__/
+coverage.xml
 dist/
 build/
+htmlcov/
 .idea
 
 #launch.json folder
