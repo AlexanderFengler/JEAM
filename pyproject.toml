@@ -45,9 +45,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+jax = [
+    "jax>=0.4.31"
+]
 test = [
     "pytest>=8",
-    "pytest-cov>=5"
+    "pytest-cov>=5",
+    "jax>=0.4.31"
 ]
 
 docs = [
@@ -62,7 +66,8 @@ docs = [
 [dependency-groups]
 test = [
     "pytest>=8",
-    "pytest-cov>=5"
+    "pytest-cov>=5",
+    "jax>=0.4.31"
 ]
 lint = [
     "ruff>=0.16.3,<0.17"
