@@ -138,7 +138,8 @@ class CircularDiffusionModel:
         rt : array-like
             Response times
         theta : array-like
-            Choice angles in radians
+            Choice angles in radians. For a fixed threshold with ``s_t=0``,
+            the supported interval is ``[-pi, pi)``.
         drift_vec : array-like, shape (2,) or (n_samples, 2)
             The drift vector [drift_x, drift_y]
         ndt : float or array-like, shape (n_samples,)
@@ -163,7 +164,17 @@ class CircularDiffusionModel:
         Returns
         -------
         array-like
-            The joint log-probability density evaluated at (rt, theta) with same shape as rt and theta
+            The joint log-probability density with respect to ``d(rt) d(theta)``.
+            For a fixed threshold with ``s_t=0``, impossible observations return
+            negative infinity.
+
+        Notes
+        -----
+        Fixed-threshold inputs are normalized before evaluation. Invalid shapes or
+        parameters raise ``ValueError``. With ``s_t=0``, a failed numerical
+        computation on valid support raises ``FloatingPointError`` instead of being
+        replaced with a finite density floor. The legacy ``s_t>0`` convolution branch
+        is unchanged pending its dedicated support correction.
         '''
 
         if self.threshold_dynamic == 'fixed':

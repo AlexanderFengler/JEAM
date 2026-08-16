@@ -398,7 +398,9 @@ class ProjectedSphericalDiffusionModel:
         rt : array-like, shape (n_samples,)
             The response times
         theta : array-like, shape (n_samples,)
-            The choice angles in radians
+            The choice angles in radians. For a fixed threshold with ``s_t=0``,
+            the supported interval is ``[0, pi]``; the coordinate density is zero
+            at both poles.
         drift_vec : array-like, shape (2,) or (n_samples, 2)
             The drift vector [drift_x, drift_y]
         ndt : float or array-like, shape (n_samples,)
@@ -424,7 +426,16 @@ class ProjectedSphericalDiffusionModel:
         -------
         log_density : array-like, shape (n_samples,)
             The joint log-probability density with respect to the ordinary
-            coordinate measure d(rt) d(theta), where theta is in [0, pi]
+            coordinate measure ``d(rt) d(theta)``. For a fixed threshold with
+            ``s_t=0``, impossible observations return negative infinity.
+
+        Notes
+        -----
+        Fixed-threshold inputs are normalized before evaluation. Invalid shapes or
+        parameters raise ``ValueError``. With ``s_t=0``, a failed numerical
+        computation on valid support raises ``FloatingPointError`` instead of being
+        replaced with a finite density floor. The legacy ``s_t>0`` convolution branch
+        is unchanged pending its dedicated support correction.
         '''
 
         if self.threshold_dynamic == 'fixed':
