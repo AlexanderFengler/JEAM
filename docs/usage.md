@@ -94,7 +94,44 @@ Use when responses are continuous in 2D and bounded within a region.
 
 ---
 
-## 4. Summary
+## 4. Reproducible CDM Simulation
+
+`CircularDiffusionModel.simulate` accepts either an integer seed, a
+`numpy.random.Generator`, or `None` through `random_state`:
+
+```python
+import numpy as np
+
+from jeam.Models.Circular import CircularDiffusionModel
+
+model = CircularDiffusionModel()
+arguments = {
+    "drift_vec": np.array([0.7, -0.35]),
+    "ndt": 0.2,
+    "threshold": 0.45,
+    "n_sample": 20,
+}
+
+first = model.simulate(**arguments, random_state=1947)
+matching = model.simulate(**arguments, random_state=1947)
+assert first.equals(matching)
+
+rng = np.random.default_rng(1947)
+first_from_stream = model.simulate(**arguments, random_state=rng)
+next_from_stream = model.simulate(**arguments, random_state=rng)
+assert not first_from_stream.equals(next_from_stream)
+```
+
+One Generator stream is shared across the whole batch, so trials are not reseeded or
+duplicated. `random_state=None` creates a local entropy-backed Generator; no CDM mode reads
+or mutates NumPy's legacy global `np.random` state.
+
+Exact repeatability is guaranteed for the same inputs, seed, and validated dependency
+versions. It is not a promise of bitwise identity across arbitrary NumPy, Numba, Python,
+or platform changes. This injected-RNG contract currently applies to the CDM family;
+extension to the other model families remains part of their hardening work.
+
+## 5. Summary
 
 JEAM is appropriate when:
 
