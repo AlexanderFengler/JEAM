@@ -1,8 +1,19 @@
 import numpy as np
 from numba import jit
 
-@jit(nopython=True)
-def simulate_CDM_trial(threshold, drift_vec, ndt, threshold_dynamic='fixed', decay=0, s_v=0, s_t=0, sigma=1, dt=0.001):
+
+def simulate_CDM_trial(
+    threshold,
+    drift_vec,
+    ndt,
+    threshold_dynamic='fixed',
+    decay=0,
+    s_v=0,
+    s_t=0,
+    sigma=1,
+    dt=0.001,
+    random_state: int | np.random.Generator | None = None,
+):
     '''
     Simulate a single trial of the circular diffusion model (CDM).
 
@@ -26,49 +37,81 @@ def simulate_CDM_trial(threshold, drift_vec, ndt, threshold_dynamic='fixed', dec
         Diffusion coefficient (standard deviation of the diffusion process). Default is 1.
     dt : float, optional
         Time step for the simulation. Default is 0.001. 
+    random_state : int, numpy.random.Generator, or None, optional
+        Seed or random-number generator used for simulation. Default is None.
 
     Returns
     -------
     rt : float
         Response time in seconds.
     theta : float
-        Response angle between [-pi, pi].
+        Response angle on [-pi, pi).
     '''
+    rng = np.random.default_rng(random_state)
+    return _simulate_CDM_trial(
+        threshold,
+        drift_vec,
+        ndt,
+        threshold_dynamic,
+        decay,
+        s_v,
+        s_t,
+        sigma,
+        dt,
+        rng,
+    )
+
+
+@jit(nopython=True)
+def _simulate_CDM_trial(
+    threshold, drift_vec, ndt, threshold_dynamic, decay, s_v, s_t, sigma, dt, rng
+):
     x = np.zeros((2,))
     
     rt = 0
 
     if s_t>0:
-        ndt_t = ndt + s_t*np.random.rand()
+        ndt_t = ndt + s_t*rng.random()
     else:
         ndt_t = ndt
 
     if s_v>0:
-        mu_t = drift_vec + s_v*np.random.randn(2)
+        mu_t = drift_vec + s_v*rng.standard_normal(2)
     else:
         mu_t = drift_vec
 
     if threshold_dynamic == 'fixed':
         while np.linalg.norm(x) < threshold:
-            x += mu_t*dt + sigma*np.sqrt(dt)*np.random.randn(2)
+            x += mu_t*dt + sigma*np.sqrt(dt)*rng.standard_normal(2)
             rt += dt
     elif threshold_dynamic == 'linear':
         while np.linalg.norm(x) < threshold - decay*rt:
-            x += mu_t*dt + sigma*np.sqrt(dt)*np.random.randn(2)
+            x += mu_t*dt + sigma*np.sqrt(dt)*rng.standard_normal(2)
             rt += dt
     elif threshold_dynamic == 'exponential':
         while np.linalg.norm(x) < threshold * np.exp(-decay*rt):
-            x += mu_t*dt + sigma*np.sqrt(dt)*np.random.randn(2)
+            x += mu_t*dt + sigma*np.sqrt(dt)*rng.standard_normal(2)
             rt += dt
     elif threshold_dynamic == 'hyperbolic':
         while np.linalg.norm(x) < threshold / (1 + decay*rt):
-            x += mu_t*dt + sigma*np.sqrt(dt)*np.random.randn(2)
+            x += mu_t*dt + sigma*np.sqrt(dt)*rng.standard_normal(2)
             rt += dt
-    theta = np.arctan2(x[1], x[0]) 
+    theta = np.arctan2(x[1], x[0])
+    if theta >= np.pi:
+        theta -= 2*np.pi
     return ndt_t+rt, theta
 
 
-def simulate_custom_threshold_CDM_trial(threshold_function, drift_vec, ndt, s_v=0, s_t=0, sigma=1, dt=0.001):
+def simulate_custom_threshold_CDM_trial(
+    threshold_function,
+    drift_vec,
+    ndt,
+    s_v=0,
+    s_t=0,
+    sigma=1,
+    dt=0.001,
+    random_state: int | np.random.Generator | None = None,
+):
     '''
     Simulate a single trial of the circular diffusion model (CDM) with a user defined threshold function.
 
@@ -90,33 +133,38 @@ def simulate_custom_threshold_CDM_trial(threshold_function, drift_vec, ndt, s_v=
         Diffusion coefficient (standard deviation of the diffusion process). Default is 1.
     dt : float, optional
         Time step for the simulation. Default is 0.001. 
+    random_state : int, numpy.random.Generator, or None, optional
+        Seed or random-number generator used for simulation. Default is None.
 
     Returns
     -------
     rt : float
         Response time in seconds.
     theta : float
-        Response angle between [-pi, pi].
+        Response angle on [-pi, pi).
     '''
+    rng = np.random.default_rng(random_state)
     x = np.zeros((2,))
     
     rt = 0
 
     if s_t>0:
-        ndt_t = ndt + s_t*np.random.rand() - s_t
+        ndt_t = ndt + s_t*rng.random() - s_t
     else:
         ndt_t = ndt
 
     if s_v>0:
-        mu_t = drift_vec + s_v*np.random.randn(2)
+        mu_t = drift_vec + s_v*rng.standard_normal(2)
     else:
         mu_t = drift_vec
 
     while np.linalg.norm(x) < threshold_function(rt):
-        x += mu_t*dt + sigma*np.sqrt(dt)*np.random.randn(2)
+        x += mu_t*dt + sigma*np.sqrt(dt)*rng.standard_normal(2)
         rt += dt
     
-    theta = np.arctan2(x[1], x[0]) 
+    theta = np.arctan2(x[1], x[0])
+    if theta >= np.pi:
+        theta -= 2*np.pi
     
     return ndt_t+rt, theta
 

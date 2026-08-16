@@ -27,7 +27,20 @@ class CircularDiffusionModel:
         
 
 
-    def simulate(self, drift_vec, ndt, threshold=1, decay=0, threshold_function=None, s_v=0, s_t=0, sigma=1, dt=0.001, n_sample=1):
+    def simulate(
+        self,
+        drift_vec,
+        ndt,
+        threshold=1,
+        decay=0,
+        threshold_function=None,
+        s_v=0,
+        s_t=0,
+        sigma=1,
+        dt=0.001,
+        n_sample=1,
+        random_state: int | np.random.Generator | None = None,
+    ):
         '''
         Simulate data from the Circular Diffusion Model with collapsing boundaries
 
@@ -53,6 +66,10 @@ class CircularDiffusionModel:
             The time step for simulation (default is 0.001)
         n_sample : int, optional
             The number of samples to simulate (default is 1)
+        random_state : int, numpy.random.Generator, or None, optional
+            Seed or random-number generator used for the complete simulated batch.
+            Passing the same seed reproduces the batch; reusing a Generator advances
+            its state. Default is None.
 
         Returns
         -------
@@ -61,6 +78,7 @@ class CircularDiffusionModel:
         '''
         RT = np.empty((n_sample,))
         Choice = np.empty((n_sample,))
+        rng = np.random.default_rng(random_state)
 
         if drift_vec.ndim == 1:
             drift_vec = drift_vec * np.ones((n_sample, 2))
@@ -95,14 +113,17 @@ class CircularDiffusionModel:
         
         if self.threshold_dynamic != 'custom':
             for n in range(n_sample):
-                RT[n], Choice[n] = simulate_CDM_trial(threshold[n], drift_vec[n, :].astype(np.float64), ndt[n], 
-                                                      threshold_dynamic=self.threshold_dynamic,
-                                                      decay=decay[n], s_v=s_v, s_t=s_t, sigma=sigma, dt=dt)
+                RT[n], Choice[n] = simulate_CDM_trial(
+                    threshold[n], drift_vec[n, :].astype(np.float64), ndt[n],
+                    threshold_dynamic=self.threshold_dynamic, decay=decay[n],
+                    s_v=s_v, s_t=s_t, sigma=sigma, dt=dt, random_state=rng
+                )
         else:
             for n in range(n_sample):
-                RT[n], Choice[n] = simulate_custom_threshold_CDM_trial(threshold_function,
-                                                                       drift_vec[n, :].astype(np.float64), ndt[n], 
-                                                                       s_v=s_v, s_t=s_t, sigma=sigma, dt=dt)
+                RT[n], Choice[n] = simulate_custom_threshold_CDM_trial(
+                    threshold_function, drift_vec[n, :].astype(np.float64), ndt[n],
+                    s_v=s_v, s_t=s_t, sigma=sigma, dt=dt, random_state=rng
+                )
         
         return pd.DataFrame(np.c_[RT, Choice], columns=['rt', 'response'])
 
@@ -276,5 +297,3 @@ class CircularDiffusionModel:
         log_density = np.maximum(log_density, np.log(0.1**14))
             
         return log_density
-
-    

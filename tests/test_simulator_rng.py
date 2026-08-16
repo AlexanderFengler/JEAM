@@ -3,12 +3,7 @@ import pandas as pd
 import pytest
 
 from jeam.Models.Circular import CircularDiffusionModel
-
-pytestmark = pytest.mark.xfail(
-    raises=TypeError,
-    strict=True,
-    reason="CDM simulation does not yet accept injected random state",
-)
+from jeam.utility.simulators import simulate_CDM_trial
 
 
 def _simulate_fixed(random_state, *, n_sample=8):
@@ -38,6 +33,15 @@ def test_fixed_cdm_same_integer_seed_reproduces_exact_batch():
     pd.testing.assert_frame_equal(first, second, check_exact=True)
 
 
+def test_single_trial_helper_accepts_the_same_seed_contract():
+    arguments = (0.45, np.array([0.7, -0.35]), 0.2)
+
+    first = simulate_CDM_trial(*arguments, dt=0.005, random_state=1947)
+    second = simulate_CDM_trial(*arguments, dt=0.005, random_state=1947)
+
+    assert first == second
+
+
 def test_fixed_cdm_different_seeds_change_batch():
     first = _simulate_fixed(1947)
     second = _simulate_fixed(1948)
@@ -65,13 +69,17 @@ def test_one_rng_stream_is_shared_across_trials():
 
 @pytest.mark.parametrize("random_state", [1947, None])
 def test_cdm_simulation_does_not_mutate_legacy_numpy_state(random_state):
-    np.random.seed(831)
-    before = np.random.get_state()
+    original_state = np.random.get_state()
+    try:
+        np.random.seed(831)
+        before = np.random.get_state()
 
-    _simulate_fixed(random_state)
+        _simulate_fixed(random_state)
 
-    after = np.random.get_state()
-    _assert_legacy_state_equal(before, after)
+        after = np.random.get_state()
+        _assert_legacy_state_equal(before, after)
+    finally:
+        np.random.set_state(original_state)
 
 
 def test_fixed_cdm_accepts_trialwise_parameters_and_preserves_output_support():
@@ -90,6 +98,38 @@ def test_fixed_cdm_accepts_trialwise_parameters_and_preserves_output_support():
     assert np.all(simulated["rt"].to_numpy() > 0)
     assert np.all(simulated["response"].to_numpy() >= -np.pi)
     assert np.all(simulated["response"].to_numpy() < np.pi)
+
+
+def test_cdm_maps_the_positive_pi_boundary_to_canonical_negative_pi():
+    simulated = CircularDiffusionModel().simulate(
+        drift_vec=np.array([-1.0, 0.0]),
+        ndt=0.1,
+        threshold=0.1,
+        sigma=0.0,
+        dt=0.01,
+        random_state=519,
+    )
+
+    assert simulated.loc[0, "response"] == -np.pi
+
+
+@pytest.mark.parametrize("threshold_dynamic", ["linear", "exponential", "hyperbolic"])
+def test_collapsing_cdm_thresholds_use_the_seeded_stream(threshold_dynamic):
+    model = CircularDiffusionModel(threshold_dynamic=threshold_dynamic)
+    arguments = {
+        "drift_vec": np.array([0.5, -0.25]),
+        "ndt": 0.15,
+        "threshold": 0.5,
+        "decay": 0.2,
+        "n_sample": 4,
+        "dt": 0.005,
+        "random_state": 997,
+    }
+
+    first = model.simulate(**arguments)
+    second = model.simulate(**arguments)
+
+    pd.testing.assert_frame_equal(first, second, check_exact=True)
 
 
 def test_custom_threshold_cdm_same_seed_reproduces_exact_batch():
