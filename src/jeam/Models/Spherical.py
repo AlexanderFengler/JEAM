@@ -114,7 +114,8 @@ class SphericalDiffusionModel:
         rt : array-like, shape (n_samples,)
             The response times
         theta : array-like, shape (n_samples, 2)
-            The choice angles in spherical coordinates (theta1, theta2)
+            The choice angles in spherical coordinates (theta1, theta2), with
+            theta1 in [0, pi] and theta2 in [-pi, pi]
         drift_vec : array-like, shape (3,) or (n_samples, 3)
             The drift rates in each dimension
         ndt : float or array-like, shape (n_samples,)
@@ -139,7 +140,8 @@ class SphericalDiffusionModel:
         Returns
         -------
         log_density : array-like, shape (n_samples,)
-            The joint log-probability density of response time and choice angles
+            The joint log-probability density with respect to the ordinary
+            coordinate measure d(rt) d(theta1) d(theta2)
         '''
 
         if drift_vec.ndim == 1:
@@ -277,8 +279,13 @@ class SphericalDiffusionModel:
                         if density > 0.1**14:
                             log_density[i] = np.log(density)
 
-        log_density[rt - ndt <= 0] = np.log(0.1**14)
+        valid_response_times = rt - ndt > 0
+        log_density[~valid_response_times] = np.log(0.1**14)
         log_density = np.maximum(log_density, np.log(0.1**14))
+        with np.errstate(divide='ignore', invalid='ignore'):
+            log_density[valid_response_times] += np.log(
+                np.sin(theta[valid_response_times, 0])
+            )
             
         return log_density
     

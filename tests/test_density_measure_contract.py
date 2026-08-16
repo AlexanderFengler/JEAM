@@ -34,10 +34,6 @@ STANDARD_SPHERICAL_CASES = [
 ]
 
 
-@pytest.mark.xfail(
-    reason="SDM and HSDM omit their angular-coordinate Jacobians",
-    strict=True,
-)
 @pytest.mark.parametrize(
     ("dimension", "model_type", "angles"), STANDARD_SPHERICAL_CASES
 )
@@ -65,10 +61,6 @@ def test_standard_spherical_density_uses_exposed_angular_coordinates(
     )
 
 
-@pytest.mark.xfail(
-    reason="SDM and HSDM omit their angular-coordinate Jacobians",
-    strict=True,
-)
 @pytest.mark.parametrize(
     ("dimension", "model_type", "axes", "surface_area"),
     [
@@ -113,3 +105,40 @@ def test_standard_spherical_density_integrates_over_complete_angular_domain(
     )
 
     assert observed_angular_mass == pytest.approx(expected_angular_mass, rel=2e-4)
+
+
+@pytest.mark.parametrize(
+    ("dimension", "model_type", "polar_angles"),
+    [
+        pytest.param(
+            3,
+            SphericalDiffusionModel,
+            np.array([[0.0, 0.0], [pi, 0.0]]),
+            id="sdm",
+        ),
+        pytest.param(
+            4,
+            HyperSphericalDiffusionModel,
+            np.array(
+                [
+                    [0.0, pi / 2, 0.0],
+                    [pi, pi / 2, 0.0],
+                    [pi / 2, 0.0, 0.0],
+                ]
+            ),
+            id="hsdm",
+        ),
+    ],
+)
+def test_standard_spherical_coordinate_density_vanishes_at_poles(
+    dimension, model_type, polar_angles
+):
+    log_density = model_type().joint_lpdf(
+        rt=np.full(polar_angles.shape[0], 0.5),
+        theta=polar_angles,
+        drift_vec=np.zeros(dimension),
+        ndt=0.0,
+        threshold=1.0,
+    )
+
+    assert np.all(np.exp(log_density) < np.finfo(np.float64).eps)
