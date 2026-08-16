@@ -20,7 +20,11 @@ def _():
     from jeam.Models.Circular import CircularDiffusionModel
     from jeam.Models.HyperSpherical import HyperSphericalDiffusionModel
     from jeam.Models.Spherical import SphericalDiffusionModel
-    from tests.numerical_diagnostics import fixed_zero_drift_surface_density
+    from tests.numerical_diagnostics import (
+        fixed_zero_drift_surface_density,
+        trapezoid_mass,
+        unit_sphere_surface_jacobian,
+    )
 
     return (
         CircularDiffusionModel,
@@ -30,6 +34,8 @@ def _():
         mo,
         np,
         pi,
+        trapezoid_mass,
+        unit_sphere_surface_jacobian,
     )
 
 
@@ -42,9 +48,9 @@ def _(mo):
     tests. The pytest suite owns every invariant; this laboratory explains those
     invariants and will accumulate one focused panel as each defect is corrected.
 
-    **Current scope:** preserve the independently verified fixed-boundary core and make
-    every audited failure visible. No red or amber row below is claimed fixed by this
-    scaffold.
+    **Current scope:** preserve the independently verified fixed-boundary core, explain
+    the corrected SDM/HSDM coordinate-density contract, and keep every remaining audited
+    failure visible.
     """)
     return
 
@@ -61,10 +67,10 @@ def _(mo):
         },
         {
             "Area": "Density measure",
-            "Audit result": "Angular-coordinate Jacobians are undocumented/absent",
+            "Audit result": "Coordinate Jacobians included and documented",
             "Invariant": "Density integrates in the exposed coordinates",
             "Planned PR": "PR03",
-            "Status": "🟠 pending",
+            "Status": "✅ protected",
         },
         {
             "Area": "Projected normalization",
@@ -213,14 +219,155 @@ def _(mo):
     mo.md(r"""
     ## Density measure
 
-    **Audit symptom:** SDM and HSDM currently return a density per unit natural surface
-    area, while users supply ordinary angular coordinates. The required coordinate
-    Jacobians are not part of the documented API.
+    **Pre-fix symptom:** SDM and HSDM returned a density per unit natural surface area,
+    while users supplied ordinary angular coordinates. Integrating those values directly
+    over the rectangular angle domains over-counted the angular mass.
 
-    **Independent oracle:** integrate the returned density over the complete angular
-    coordinate domain using explicit hyperspherical Jacobians. PR03 will turn this into
-    a measure-declaration and coordinate-density panel.
+    **Corrected contract:** `joint_lpdf` is a density with respect to ordinary Lebesgue
+    measure in the exposed columns. SDM therefore includes
+    $\sin(\theta_1)$, and HSDM includes
+    $\sin^2(\theta_1)\sin(\theta_2)$. The panel compares JEAM pointwise with the
+    independent surface-density oracle times that Jacobian, then integrates JEAM over
+    the complete angular domain.
     """)
+    return
+
+
+@app.cell
+def _(mo, pi):
+    density_dimension_control = mo.ui.slider(
+        start=3,
+        stop=4,
+        step=1,
+        value=3,
+        label="Accumulator dimension",
+        show_value=True,
+    )
+    primary_polar_control = mo.ui.slider(
+        start=0.05,
+        stop=pi - 0.05,
+        step=0.05,
+        value=1.05,
+        label="Primary polar angle",
+        show_value=True,
+    )
+    secondary_polar_control = mo.ui.slider(
+        start=0.05,
+        stop=pi - 0.05,
+        step=0.05,
+        value=0.8,
+        label="Second polar angle (HSDM only)",
+        show_value=True,
+    )
+    mo.vstack(
+        [
+            density_dimension_control,
+            primary_polar_control,
+            secondary_polar_control,
+        ],
+        align="start",
+    )
+    return (
+        density_dimension_control,
+        primary_polar_control,
+        secondary_polar_control,
+    )
+
+
+@app.cell
+def _(
+    HyperSphericalDiffusionModel,
+    SphericalDiffusionModel,
+    density_dimension_control,
+    fixed_zero_drift_surface_density,
+    mo,
+    np,
+    pi,
+    primary_polar_control,
+    secondary_polar_control,
+    time_control,
+    trapezoid_mass,
+    unit_sphere_surface_jacobian,
+):
+    _dimension = int(density_dimension_control.value)
+    _decision_time = float(time_control.value)
+    _model_types = {
+        3: SphericalDiffusionModel,
+        4: HyperSphericalDiffusionModel,
+    }
+    _surface_areas = {3: 4 * pi, 4: 2 * pi**2}
+    if _dimension == 3:
+        _selected_angles = np.array([[primary_polar_control.value, 0.0]])
+        _axes = (
+            np.linspace(0.0, pi, 101),
+            np.linspace(-pi, pi, 2),
+        )
+    else:
+        _selected_angles = np.array(
+            [
+                [
+                    primary_polar_control.value,
+                    secondary_polar_control.value,
+                    0.0,
+                ]
+            ]
+        )
+        _axes = (
+            np.linspace(0.0, pi, 81),
+            np.linspace(0.0, pi, 81),
+            np.linspace(-pi, pi, 2),
+        )
+
+    _surface_density = float(
+        fixed_zero_drift_surface_density(_dimension, [_decision_time])[0]
+    )
+    _coordinate_jacobian = float(unit_sphere_surface_jacobian(*_selected_angles.T)[0])
+    _observed_density = float(
+        np.exp(
+            _model_types[_dimension]().joint_lpdf(
+                rt=np.array([_decision_time]),
+                theta=_selected_angles,
+                drift_vec=np.zeros(_dimension),
+                ndt=0.0,
+                threshold=1.0,
+            )
+        )[0]
+    )
+    _expected_density = _surface_density * _coordinate_jacobian
+
+    _angular_grid = np.meshgrid(*_axes, indexing="ij")
+    _all_angles = np.column_stack(
+        [_coordinate.ravel() for _coordinate in _angular_grid]
+    )
+    _grid_density = np.exp(
+        _model_types[_dimension]().joint_lpdf(
+            rt=np.full(_all_angles.shape[0], _decision_time),
+            theta=_all_angles,
+            drift_vec=np.zeros(_dimension),
+            ndt=0.0,
+            threshold=1.0,
+        )
+    ).reshape(_angular_grid[0].shape)
+    _observed_mass = trapezoid_mass(_grid_density, _axes)
+    _expected_mass = _surface_areas[_dimension] * _surface_density
+
+    mo.ui.table(
+        [
+            {
+                "Model": "SDM" if _dimension == 3 else "HSDM",
+                "Coordinate Jacobian": _coordinate_jacobian,
+                "JEAM coordinate density": _observed_density,
+                "Oracle × Jacobian": _expected_density,
+                "Pointwise relative error": abs(_observed_density - _expected_density)
+                / _expected_density,
+                "Integrated angular mass": _observed_mass,
+                "Expected angular mass": _expected_mass,
+                "Mass ratio": _observed_mass / _expected_mass,
+            }
+        ],
+        pagination=False,
+        selection=None,
+    )
     return
 
 
