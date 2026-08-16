@@ -18,8 +18,14 @@ def _():
         sys.path.insert(0, _repository_root)
 
     from jeam.Models.Circular import CircularDiffusionModel
-    from jeam.Models.HyperSpherical import HyperSphericalDiffusionModel
-    from jeam.Models.Spherical import SphericalDiffusionModel
+    from jeam.Models.HyperSpherical import (
+        HyperSphericalDiffusionModel,
+        ProjectedHyperSphericalDiffusionModel,
+    )
+    from jeam.Models.Spherical import (
+        ProjectedSphericalDiffusionModel,
+        SphericalDiffusionModel,
+    )
     from tests.numerical_diagnostics import (
         fixed_zero_drift_surface_density,
         trapezoid_mass,
@@ -29,6 +35,8 @@ def _():
     return (
         CircularDiffusionModel,
         HyperSphericalDiffusionModel,
+        ProjectedHyperSphericalDiffusionModel,
+        ProjectedSphericalDiffusionModel,
         SphericalDiffusionModel,
         fixed_zero_drift_surface_density,
         mo,
@@ -49,8 +57,8 @@ def _(mo):
     invariants and will accumulate one focused panel as each defect is corrected.
 
     **Current scope:** preserve the independently verified fixed-boundary core, explain
-    the corrected SDM/HSDM coordinate-density contract, and keep every remaining audited
-    failure visible.
+    the corrected standard and projected coordinate-density contracts, and keep every
+    remaining audited failure visible.
     """)
     return
 
@@ -74,10 +82,10 @@ def _(mo):
         },
         {
             "Area": "Projected normalization",
-            "Audit result": "PSDM and PHSDM omit dimensional constants",
+            "Audit result": "Dimensional constants and Jacobians restored",
             "Invariant": "Full-domain probability mass equals one",
             "Planned PR": "PR04",
-            "Status": "🔴 failing",
+            "Status": "✅ protected",
         },
         {
             "Area": "PHSDM geometry",
@@ -459,12 +467,90 @@ def _(mo):
     mo.md(r"""
     ## Projected-model normalization
 
-    **Audit symptom:** at zero drift, PSDM and PHSDM integrate to $(2\pi)^{3/2}$ and
-    $4\pi^2$ under their current projected surface measures, not one.
+    **Pre-fix symptom:** at zero drift, PSDM and PHSDM integrated to
+    $(2\pi)^{3/2}$ and $4\pi^2$ under their projected surface measures, not one.
+    They also omitted the remaining response-coordinate Jacobians after marginalizing
+    the hidden azimuth.
 
-    **Independent oracle:** full-domain quadrature with dimensional constants derived
-    before calling JEAM. PR04 will plot cumulative mass before and after correction.
+    **Corrected contract:** the projected likelihoods return densities in their exposed
+    response coordinates. The table integrates over response time and the full projected
+    response domain. Its historical column reconstructs the audited implementation by
+    reversing the missing dimensional constant at unit-Jacobian response points; its
+    corrected column calls JEAM directly. The independent formula remains enforced in
+    pytest.
     """)
+    return
+
+
+@app.cell
+def _(
+    ProjectedHyperSphericalDiffusionModel,
+    ProjectedSphericalDiffusionModel,
+    mo,
+    np,
+    pi,
+    trapezoid_mass,
+):
+    _projected_times = np.linspace(1e-6, 12.0, 30_000)
+    _projected_cases = [
+        (
+            "PSDM",
+            3,
+            ProjectedSphericalDiffusionModel,
+            np.full(_projected_times.size, pi / 2),
+            2.0,
+            (2 * pi) ** 1.5,
+        ),
+        (
+            "PHSDM",
+            4,
+            ProjectedHyperSphericalDiffusionModel,
+            np.full((_projected_times.size, 2), pi / 2),
+            pi,
+            4 * pi**2,
+        ),
+    ]
+    _projected_rows = []
+    for (
+        _model_name,
+        _dimension,
+        _model_type,
+        _unit_jacobian_angles,
+        _response_jacobian_integral,
+        _audited_historical_mass,
+    ) in _projected_cases:
+        _corrected_density = np.exp(
+            _model_type().joint_lpdf(
+                rt=_projected_times,
+                theta=_unit_jacobian_angles,
+                drift_vec=np.zeros(_dimension - 1),
+                ndt=0.0,
+                threshold=1.0,
+            )
+        )
+        _historical_density = _audited_historical_mass * _corrected_density
+        _historical_mass = _response_jacobian_integral * trapezoid_mass(
+            _historical_density, (_projected_times,)
+        )
+        _corrected_mass = _response_jacobian_integral * trapezoid_mass(
+            _corrected_density, (_projected_times,)
+        )
+        _projected_rows.append(
+            {
+                "Model": _model_name,
+                "Historical pre-fix mass": _historical_mass,
+                "Corrected JEAM mass": _corrected_mass,
+                "Expected mass": 1.0,
+                "Resolution": (
+                    "RESOLVED"
+                    if abs(_corrected_mass - 1.0) < 2e-4
+                    and abs(_historical_mass - _audited_historical_mass) < 2e-3
+                    else "CHECK"
+                ),
+            }
+        )
+
+    mo.ui.table(_projected_rows, pagination=False, selection=None)
     return
 
 

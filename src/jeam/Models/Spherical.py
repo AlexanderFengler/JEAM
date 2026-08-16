@@ -422,7 +422,8 @@ class ProjectedSphericalDiffusionModel:
         Returns
         -------
         log_density : array-like, shape (n_samples,)
-            The joint log-probability density of response time and choice angle
+            The joint log-probability density with respect to the ordinary
+            coordinate measure d(rt) d(theta), where theta is in [0, pi]
         '''
 
         if drift_vec.ndim == 1:
@@ -575,7 +576,13 @@ class ProjectedSphericalDiffusionModel:
                         if density > 0.1**14:
                                 log_density[i] = np.log(density)
 
-        log_density[rt - ndt <= 0] = np.log(0.1**14)
+        valid_response_times = rt - ndt > 0
+        log_density[~valid_response_times] = np.log(0.1**14)
         log_density = np.maximum(log_density, np.log(0.1**14))
+        with np.errstate(divide='ignore', invalid='ignore'):
+            log_density[valid_response_times] += (
+                -1.5*np.log(2*np.pi)
+                + np.log(np.sin(theta[valid_response_times]))
+            )
             
         return log_density

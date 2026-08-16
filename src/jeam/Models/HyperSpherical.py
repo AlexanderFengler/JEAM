@@ -423,7 +423,9 @@ class ProjectedHyperSphericalDiffusionModel:
         Returns
         -------
         log_density : array-like, shape (n_samples,)
-            The joint log-probability density of response time and choice angles
+            The joint log-probability density with respect to the ordinary
+            coordinate measure d(rt) d(theta1) d(theta2), where both angles
+            are in [0, pi]
         '''
         if drift_vec.ndim == 1:
             drift_vec = drift_vec * np.ones((rt.shape[0], 3))
@@ -591,7 +593,14 @@ class ProjectedHyperSphericalDiffusionModel:
                         if density > 0.1**14:
                                 log_density[i] = np.log(density)
         
-        log_density[rt - ndt <= 0] = np.log(0.1**14)
+        valid_response_times = rt - ndt > 0
+        log_density[~valid_response_times] = np.log(0.1**14)
         log_density = np.maximum(log_density, np.log(0.1**14))
+        with np.errstate(divide='ignore', invalid='ignore'):
+            log_density[valid_response_times] += (
+                -2*np.log(2*np.pi)
+                + 2*np.log(np.sin(theta[valid_response_times, 0]))
+                + np.log(np.sin(theta[valid_response_times, 1]))
+            )
             
         return log_density
