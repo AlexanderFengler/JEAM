@@ -11,7 +11,7 @@ FloatArray = NDArray[np.float64]
 
 
 @dataclass(frozen=True)
-class FixedSingleAngleInputs:
+class _FixedSingleAngleInputs:
     """Validated, consistently shaped inputs for one-angle likelihoods."""
 
     rt: FloatArray
@@ -156,7 +156,7 @@ def normalize_fixed_single_angle_likelihood_inputs(
     sigma: Any,
     approximation_step: Any,
     require_nonnegative_second_drift: bool = False,
-) -> FixedSingleAngleInputs:
+) -> _FixedSingleAngleInputs:
     """Validate and normalize inputs used by fixed CDM and PSDM likelihoods.
 
     Response-support semantics are intentionally left to the likelihood. This
@@ -175,7 +175,7 @@ def normalize_fixed_single_angle_likelihood_inputs(
     if normalized_theta.shape[0] != n_observations:
         raise ValueError("theta must have the same length as rt.")
 
-    return FixedSingleAngleInputs(
+    return _FixedSingleAngleInputs(
         rt=normalized_rt,
         theta=normalized_theta,
         drift_vec=_drift_matrix(
