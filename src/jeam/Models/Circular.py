@@ -160,21 +160,26 @@ class CircularDiffusionModel:
             The diffusion coefficient (default is 1)
         approximation_step : float, optional
             The time step for numerical estimation of first-passage time densities (default is 0.01)
+        log_density_floor : float or None, optional
+            Optional finite lower bound for returned log densities. The default
+            ``None`` preserves strict support with negative infinity.
 
         Returns
         -------
         array-like
             The joint log-probability density with respect to ``d(rt) d(theta)``.
             For a fixed threshold with ``s_t=0``, impossible observations return
-            negative infinity.
+            negative infinity unless ``log_density_floor`` is supplied.
 
         Notes
         -----
         Fixed-threshold inputs are normalized before evaluation. Invalid shapes or
         parameters raise ``ValueError``. With ``s_t=0``, a failed numerical
         computation on valid support raises ``FloatingPointError`` instead of being
-        replaced with a finite density floor. The legacy ``s_t>0`` convolution branch
-        is unchanged pending its dedicated support correction.
+        replaced with a finite density floor. An explicit ``log_density_floor`` is
+        applied only after these checks and is an algorithmic approximation rather
+        than a normalized density. The legacy ``s_t>0`` convolution branch is
+        unchanged pending its dedicated support correction.
         '''
 
         log_density_floor = normalize_log_density_floor(log_density_floor)

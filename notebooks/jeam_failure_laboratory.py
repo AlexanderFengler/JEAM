@@ -665,10 +665,13 @@ def _(mo):
     **Corrected contract for `s_t=0`:** CDM uses $rt>ndt$ and
     $\theta\in[-\pi,\pi)$; PSDM uses $rt>ndt$ and
     $\theta\in[0,\pi]$, with zero coordinate density at its poles. Impossible data
-    return `-inf`, valid short times stay in analytical log space, invalid inputs raise
-    `ValueError`, and failed computations raise `FloatingPointError`. The separate
-    `s_t>0` leading-edge defect remains visible above and is not relabeled as impossible
-    data by this correction.
+    return `-inf` by default, while an explicit finite `log_density_floor` supports
+    numerical workflows that need bounded log values. Valid short times stay in
+    analytical log space, invalid inputs raise `ValueError`, and failed computations
+    raise `FloatingPointError` before any floor is applied. A floored result is an
+    algorithmic approximation, not a normalized density. The separate `s_t>0`
+    leading-edge defect remains visible above and is not relabeled as impossible data
+    by this correction.
     """)
     return
 
@@ -683,6 +686,7 @@ def _(
     pi,
 ):
     _historical_floor = float(np.log(1e-14))
+    _configured_floor = -66.1
     _common = {
         "drift_vec": np.array([0.45, 0.2]),
         "ndt": 0.1,
@@ -691,11 +695,26 @@ def _(
         "s_t": 0.0,
         "sigma": 0.9,
     }
+    _floored_common = _common | {"log_density_floor": _configured_floor}
     _cdm_impossible = float(
         CircularDiffusionModel().joint_lpdf(rt=0.1, theta=0.4, **_common)[0]
     )
+    _cdm_impossible_floored = float(
+        CircularDiffusionModel().joint_lpdf(
+            rt=0.1,
+            theta=0.4,
+            **_floored_common,
+        )[0]
+    )
     _cdm_upper_endpoint = float(
         CircularDiffusionModel().joint_lpdf(rt=0.8, theta=pi, **_common)[0]
+    )
+    _cdm_upper_endpoint_floored = float(
+        CircularDiffusionModel().joint_lpdf(
+            rt=0.8,
+            theta=pi,
+            **_floored_common,
+        )[0]
     )
     _psdm_outside = float(
         ProjectedSphericalDiffusionModel().joint_lpdf(
@@ -704,11 +723,25 @@ def _(
             **_common,
         )[0]
     )
+    _psdm_outside_floored = float(
+        ProjectedSphericalDiffusionModel().joint_lpdf(
+            rt=0.8,
+            theta=pi + 0.01,
+            **_floored_common,
+        )[0]
+    )
     _short_time = float(
         CircularDiffusionModel().joint_lpdf(
             rt=0.100001,
             theta=0.4,
             **(_common | {"drift_vec": np.zeros(2)}),
+        )[0]
+    )
+    _short_time_floored = float(
+        CircularDiffusionModel().joint_lpdf(
+            rt=0.100001,
+            theta=0.4,
+            **(_floored_common | {"drift_vec": np.zeros(2)}),
         )[0]
     )
     try:
@@ -728,31 +761,36 @@ def _(
         {
             "Case": "rt equals ndt",
             "Historical behavior": _historical_floor,
-            "Corrected behavior": _cdm_impossible,
-            "Expected": "-inf (impossible)",
+            "Strict default": _cdm_impossible,
+            "Opt-in floor (-66.1)": _cdm_impossible_floored,
+            "Expected": "-inf or configured floor",
         },
         {
             "Case": "CDM theta equals +pi",
             "Historical behavior": "finite periodic evaluation",
-            "Corrected behavior": _cdm_upper_endpoint,
-            "Expected": "-inf (upper endpoint excluded)",
+            "Strict default": _cdm_upper_endpoint,
+            "Opt-in floor (-66.1)": _cdm_upper_endpoint_floored,
+            "Expected": "-inf or configured floor",
         },
         {
             "Case": "PSDM theta exceeds pi",
             "Historical behavior": "NaN",
-            "Corrected behavior": _psdm_outside,
-            "Expected": "-inf (impossible)",
+            "Strict default": _psdm_outside,
+            "Opt-in floor (-66.1)": _psdm_outside_floored,
+            "Expected": "-inf or configured floor",
         },
         {
             "Case": "valid decision time = 1e-6",
             "Historical behavior": _historical_floor,
-            "Corrected behavior": _short_time,
-            "Expected": "finite analytical log density",
+            "Strict default": _short_time,
+            "Opt-in floor (-66.1)": _short_time_floored,
+            "Expected": "analytical value or configured floor",
         },
         {
             "Case": "NaN long-time FPT",
             "Historical behavior": "not separated from density masking",
-            "Corrected behavior": _numerical_failure,
+            "Strict default": _numerical_failure,
+            "Opt-in floor (-66.1)": "not applied; error raised first",
             "Expected": "FloatingPointError",
         },
     ]
@@ -761,14 +799,18 @@ def _(
         and np.isneginf(_cdm_upper_endpoint)
         and np.isneginf(_psdm_outside)
         and np.isfinite(_short_time)
-        and _short_time < _historical_floor
+        and _short_time < _configured_floor
+        and _cdm_impossible_floored == _configured_floor
+        and _cdm_upper_endpoint_floored == _configured_floor
+        and _psdm_outside_floored == _configured_floor
+        and _short_time_floored == _configured_floor
         and _numerical_failure == "FloatingPointError"
     )
 
     mo.vstack(
         [
             mo.callout(
-                "RESOLVED for fixed CDM/PSDM with s_t=0."
+                "RESOLVED: strict and optional floored modes are separated."
                 if _resolved
                 else "CHECK: at least one support/error invariant failed.",
                 kind="success" if _resolved else "danger",
