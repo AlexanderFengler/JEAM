@@ -1,7 +1,7 @@
 """Differentiable fixed-boundary likelihoods implemented with JAX.
 
 The fixed CDM likelihood is differentiable almost everywhere. Its response-support
-boundaries and the two short/long-time blend knots are intentionally non-smooth.
+boundaries and piecewise blend/reliability transitions are intentionally non-smooth.
 """
 
 from collections.abc import Sequence
@@ -17,6 +17,7 @@ from jeam.utility.Constants import JVZ1, zeros_0
 _SHORT_TIME_END = 0.002
 _LONG_TIME_START = 0.02
 _STARTING_RADIUS_SQUARED = 0.1**8
+_LONG_TIME_RELIABILITY_LOG_RANGE = float(np.log(100.0))
 _LOG_TWO_PI = float(np.log(2.0 * np.pi))
 _ZEROS_0 = np.asarray(zeros_0, dtype=np.float64)
 _LONG_TIME_COEFFICIENTS = np.asarray(zeros_0 / JVZ1, dtype=np.float64)
@@ -111,8 +112,8 @@ def _long_time_log_fpt(
     decision_time: jax.Array,
     threshold: jax.Array,
     sigma: jax.Array,
-) -> tuple[jax.Array, jax.Array]:
-    """Return log-absolute density and sign for the alternating Bessel series.
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """Return log density magnitude, sign, and a summation-error bound.
 
     Terms are exponentially scaled and accumulated in their declared order with Kahan
     compensation. This avoids both exponent underflow and reduction-tree-dependent
@@ -147,7 +148,15 @@ def _long_time_log_fpt(
     )
     sign = jnp.sign(scaled_series)
     log_absolute_series = maximum_log_term + jnp.log(jnp.abs(scaled_series))
-    return jnp.log(scale) + log_absolute_series, sign
+    n_terms = jnp.asarray(_ZEROS_0.size, dtype=dtype)
+    eps = jnp.asarray(np.finfo(np.float64).eps, dtype=dtype)
+    gamma_n = n_terms * eps / (1.0 - n_terms * eps)
+    log_roundoff_bound = jnp.log(scale) + jnp.log(gamma_n) + logsumexp(log_terms)
+    return (
+        jnp.log(scale) + log_absolute_series,
+        sign,
+        log_roundoff_bound,
+    )
 
 
 def fixed_cdm_logpdf_single(
@@ -196,7 +205,11 @@ def fixed_cdm_logpdf_single(
         safe_threshold,
         safe_sigma,
     )
-    long_log_absolute_density, long_sign = _long_time_log_fpt(
+    (
+        long_log_absolute_density,
+        long_sign,
+        long_log_roundoff_bound,
+    ) = _long_time_log_fpt(
         safe_decision_time,
         safe_threshold,
         safe_sigma,
@@ -214,10 +227,38 @@ def fixed_cdm_logpdf_single(
             b=jnp.stack((jnp.ones_like(long_sign), long_sign)),
             return_sign=True,
         )
-        return jnp.where(
+        positive_blended_log_density = jnp.where(
             blended_sign > 0.0,
             blended_log_absolute_density,
             short_log_density,
+        )
+        log_signal_to_error = jnp.where(
+            long_sign > 0.0,
+            long_log_absolute_density - long_log_roundoff_bound,
+            -jnp.inf,
+        )
+        long_density_weight = jnp.clip(
+            log_signal_to_error / _LONG_TIME_RELIABILITY_LOG_RANGE,
+            0.0,
+            1.0,
+        )
+
+        def fade_in_long_density(_: None) -> jax.Array:
+            return jnp.logaddexp(
+                jnp.log1p(-long_density_weight) + short_log_density,
+                jnp.log(long_density_weight) + positive_blended_log_density,
+            )
+
+        return jax.lax.cond(
+            long_density_weight <= 0.0,
+            lambda unused: short_log_density,
+            lambda unused: jax.lax.cond(
+                long_density_weight >= 1.0,
+                lambda inner_unused: positive_blended_log_density,
+                fade_in_long_density,
+                operand=None,
+            ),
+            operand=None,
         )
 
     def evaluate_nonshort(_: None) -> jax.Array:
