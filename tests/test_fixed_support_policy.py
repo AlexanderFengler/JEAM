@@ -217,6 +217,11 @@ def test_fixed_likelihood_raises_for_failed_first_passage_computation(
     ("model_type", "theta", "module", "long_function_name", "short_function_name"),
     FPT_IMPLEMENTATIONS,
 )
+@pytest.mark.parametrize(
+    "failed_value",
+    [np.nan, -1.0],
+    ids=["nonfinite", "nonpositive"],
+)
 def test_fixed_likelihood_floor_does_not_mask_numerical_failure(
     monkeypatch: pytest.MonkeyPatch,
     model_type: ModelType,
@@ -224,9 +229,10 @@ def test_fixed_likelihood_floor_does_not_mask_numerical_failure(
     module: ModuleType,
     long_function_name: str,
     short_function_name: str,
+    failed_value: float,
 ):
     del short_function_name
-    monkeypatch.setattr(module, long_function_name, _constant_fpt(np.nan))
+    monkeypatch.setattr(module, long_function_name, _constant_fpt(failed_value))
 
     with pytest.raises(FloatingPointError, match="first-passage density"):
         _evaluate(
