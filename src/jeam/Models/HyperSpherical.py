@@ -113,7 +113,8 @@ class HyperSphericalDiffusionModel:
         rt : array-like, shape (n_samples,)
             The response times
         theta : array-like, shape (n_samples, 3)
-            The choice angles in spherical coordinates (theta1, theta2, theta3)
+            The choice angles in spherical coordinates (theta1, theta2, theta3),
+            with theta1 and theta2 in [0, pi] and theta3 in [-pi, pi]
         drift_vec : array-like, shape (4,) or (n_samples, 4)
             The drift rates in each dimension
         ndt : float or array-like, shape (n_samples,)
@@ -138,7 +139,8 @@ class HyperSphericalDiffusionModel:
         Returns
         -------
         log_density : array-like, shape (n_samples,)
-            The joint log-probability density of response time and choice angles
+            The joint log-probability density with respect to the ordinary
+            coordinate measure d(rt) d(theta1) d(theta2) d(theta3)
         '''
 
         if drift_vec.ndim == 1:
@@ -285,8 +287,14 @@ class HyperSphericalDiffusionModel:
                         if density > 0.1**14:
                             log_density[i] = np.log(density)
 
-        log_density[rt - ndt <= 0] = np.log(0.1**14)
+        valid_response_times = rt - ndt > 0
+        log_density[~valid_response_times] = np.log(0.1**14)
         log_density = np.maximum(log_density, np.log(0.1**14))
+        with np.errstate(divide='ignore', invalid='ignore'):
+            log_density[valid_response_times] += (
+                2*np.log(np.sin(theta[valid_response_times, 0]))
+                + np.log(np.sin(theta[valid_response_times, 1]))
+            )
             
         return log_density
     
