@@ -62,6 +62,78 @@ def test_standard_spherical_density_uses_exposed_angular_coordinates(
 
 
 @pytest.mark.parametrize(
+    ("dimension", "model_type", "angles", "boundary_directions", "drift_vectors"),
+    [
+        pytest.param(
+            3,
+            SphericalDiffusionModel,
+            np.array([[pi / 3, pi / 4], [2 * pi / 3, -pi / 6]]),
+            np.array(
+                [
+                    [1 / 2, np.sqrt(6) / 4, np.sqrt(6) / 4],
+                    [-1 / 2, 3 / 4, -np.sqrt(3) / 4],
+                ]
+            ),
+            np.array([[0.45, -0.20, 0.35], [-0.15, 0.40, -0.25]]),
+            id="sdm",
+        ),
+        pytest.param(
+            4,
+            HyperSphericalDiffusionModel,
+            np.array(
+                [
+                    [pi / 3, pi / 4, pi / 6],
+                    [2 * pi / 3, pi / 3, -pi / 4],
+                ]
+            ),
+            np.array(
+                [
+                    [1 / 2, np.sqrt(6) / 4, 3 * np.sqrt(2) / 8, np.sqrt(6) / 8],
+                    [-1 / 2, np.sqrt(3) / 4, 3 * np.sqrt(2) / 8, -3 * np.sqrt(2) / 8],
+                ]
+            ),
+            np.array([[0.45, -0.20, 0.35, -0.10], [-0.15, 0.40, -0.25, 0.30]]),
+            id="hsdm",
+        ),
+    ],
+)
+def test_standard_spherical_coordinate_density_with_nonzero_drift(
+    dimension, model_type, angles, boundary_directions, drift_vectors
+):
+    decision_times = np.array([0.17, 0.63])
+    threshold = 1.2
+    sigma = 0.7
+
+    observed = model_type().joint_lpdf(
+        rt=decision_times,
+        theta=angles,
+        drift_vec=drift_vectors,
+        ndt=0.0,
+        threshold=threshold,
+        sigma=sigma,
+    )
+    surface_density = fixed_zero_drift_surface_density(
+        dimension,
+        decision_times,
+        threshold=threshold,
+        sigma=sigma,
+    )
+    drift_projection = np.sum(drift_vectors * boundary_directions, axis=1)
+    squared_drift_norm = np.sum(drift_vectors**2, axis=1)
+    log_girsanov_factor = (
+        threshold * drift_projection / sigma**2
+        - 0.5 * squared_drift_norm * decision_times / sigma**2
+    )
+    expected = (
+        np.log(surface_density)
+        + log_girsanov_factor
+        + np.log(unit_sphere_surface_jacobian(*angles.T))
+    )
+
+    np.testing.assert_allclose(observed, expected, rtol=2e-12, atol=2e-12)
+
+
+@pytest.mark.parametrize(
     ("dimension", "model_type", "axes", "surface_area"),
     [
         pytest.param(
