@@ -5,6 +5,7 @@ from scipy.special import iv
 from ..utility.helpers import trapz_1d
 from ..utility.simulators import simulate_CDM_trial, simulate_custom_threshold_CDM_trial
 from ..utility.fpts import cdm_short_t_fpt_z, cdm_long_t_fpt_z, ie_fpt_linear, ie_fpt_exponential, ie_fpt_hyperbolic, ie_fpt_custom
+from ..utility.validation import normalize_fixed_single_angle_likelihood_inputs
 
 class CircularDiffusionModel:
     '''
@@ -164,6 +165,30 @@ class CircularDiffusionModel:
         array-like
             The joint log-probability density evaluated at (rt, theta) with same shape as rt and theta
         '''
+
+        if self.threshold_dynamic == 'fixed':
+            inputs = normalize_fixed_single_angle_likelihood_inputs(
+                rt=rt,
+                theta=theta,
+                drift_vec=drift_vec,
+                ndt=ndt,
+                threshold=threshold,
+                threshold_function=threshold_function,
+                dt_threshold_function=dt_threshold_function,
+                s_v=s_v,
+                s_t=s_t,
+                sigma=sigma,
+                approximation_step=approximation_step,
+            )
+            rt = inputs.rt
+            theta = inputs.theta
+            drift_vec = inputs.drift_vec
+            ndt = inputs.ndt
+            threshold = inputs.threshold
+            s_v = inputs.s_v
+            s_t = inputs.s_t
+            sigma = inputs.sigma
+            approximation_step = inputs.approximation_step
 
         if drift_vec.ndim == 1:
             drift_vec = drift_vec * np.ones((rt.shape[0], 2))

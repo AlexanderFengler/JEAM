@@ -6,6 +6,7 @@ from ..utility.helpers import trapz_1d
 from ..utility.simulators import simulate_SDM_trial, simulate_custom_threshold_SDM_trial
 from ..utility.simulators import simulate_PSDM_trial, simulate_custom_threshold_PSDM_trial
 from ..utility.fpts import sdm_short_t_fpt_z, sdm_long_t_fpt_z, ie_fpt_linear, ie_fpt_exponential, ie_fpt_hyperbolic, ie_fpt_custom
+from ..utility.validation import normalize_fixed_single_angle_likelihood_inputs
 
 
 class SphericalDiffusionModel:
@@ -425,6 +426,31 @@ class ProjectedSphericalDiffusionModel:
             The joint log-probability density with respect to the ordinary
             coordinate measure d(rt) d(theta), where theta is in [0, pi]
         '''
+
+        if self.threshold_dynamic == 'fixed':
+            inputs = normalize_fixed_single_angle_likelihood_inputs(
+                rt=rt,
+                theta=theta,
+                drift_vec=drift_vec,
+                ndt=ndt,
+                threshold=threshold,
+                threshold_function=threshold_function,
+                dt_threshold_function=dt_threshold_function,
+                s_v=s_v,
+                s_t=s_t,
+                sigma=sigma,
+                approximation_step=approximation_step,
+                require_nonnegative_second_drift=True,
+            )
+            rt = inputs.rt
+            theta = inputs.theta
+            drift_vec = inputs.drift_vec
+            ndt = inputs.ndt
+            threshold = inputs.threshold
+            s_v = inputs.s_v
+            s_t = inputs.s_t
+            sigma = inputs.sigma
+            approximation_step = inputs.approximation_step
 
         if drift_vec.ndim == 1:
             drift_vec = drift_vec * np.ones((rt.shape[0], 2))
