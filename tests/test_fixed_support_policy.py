@@ -54,6 +54,8 @@ LEGACY_NDT_VARIABILITY_VALUES = [
     ),
 ]
 
+LOG_DENSITY_FLOOR = -66.1
+
 
 def _arguments(theta: Any) -> dict[str, Any]:
     """Return one valid, asymmetric fixed-likelihood argument set."""
@@ -134,6 +136,62 @@ def test_fixed_psdm_enforces_closed_angle_domain_and_zero_density_at_poles():
     assert np.isfinite(observed[4])
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="Optional fixed-likelihood floors are not implemented yet.",
+)
+@pytest.mark.parametrize(("model_type", "theta"), FIXED_MODELS)
+def test_fixed_likelihood_applies_opt_in_floor_after_strict_evaluation(
+    model_type,
+    theta,
+):
+    """A floor should cover support and tail values without changing the interior."""
+    response = np.full(3, theta[0])
+    rt = np.array([0.1, 0.100001, 0.8])
+    strict = _evaluate(
+        model_type,
+        response,
+        rt=rt,
+        ndt=0.1,
+    )
+    floored = _evaluate(
+        model_type,
+        response,
+        rt=rt,
+        ndt=0.1,
+        log_density_floor=LOG_DENSITY_FLOOR,
+    )
+
+    assert np.isneginf(strict[0])
+    assert strict[1] < LOG_DENSITY_FLOOR
+    assert strict[2] > LOG_DENSITY_FLOOR
+    np.testing.assert_allclose(
+        floored,
+        np.maximum(strict, LOG_DENSITY_FLOOR),
+        rtol=0.0,
+        atol=0.0,
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Optional fixed-likelihood floors are not implemented yet.",
+)
+@pytest.mark.parametrize(("model_type", "theta"), FIXED_MODELS)
+@pytest.mark.parametrize(
+    "floor",
+    [np.nan, np.inf, -np.inf, [-66.1]],
+    ids=["nan", "positive-infinity", "negative-infinity", "array"],
+)
+def test_fixed_likelihood_rejects_invalid_log_density_floor(
+    model_type,
+    theta,
+    floor,
+):
+    with pytest.raises(ValueError, match="log_density_floor"):
+        _evaluate(model_type, theta, log_density_floor=floor)
+
+
 def _constant_fpt(value: float) -> Callable[..., np.ndarray]:
     def evaluate(time, *args, **kwargs):
         del args, kwargs
@@ -161,6 +219,33 @@ def test_fixed_likelihood_raises_for_failed_first_passage_computation(
 
     with pytest.raises(FloatingPointError, match="first-passage density"):
         _evaluate(model_type, theta)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Optional fixed-likelihood floors are not implemented yet.",
+)
+@pytest.mark.parametrize(
+    ("model_type", "theta", "module", "long_function_name", "short_function_name"),
+    FPT_IMPLEMENTATIONS,
+)
+def test_fixed_likelihood_floor_does_not_mask_numerical_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    model_type: ModelType,
+    theta: np.ndarray,
+    module: ModuleType,
+    long_function_name: str,
+    short_function_name: str,
+):
+    del short_function_name
+    monkeypatch.setattr(module, long_function_name, _constant_fpt(np.nan))
+
+    with pytest.raises(FloatingPointError, match="first-passage density"):
+        _evaluate(
+            model_type,
+            theta,
+            log_density_floor=LOG_DENSITY_FLOOR,
+        )
 
 
 @pytest.mark.parametrize(
