@@ -16,11 +16,6 @@ FIXED_SINGLE_ANGLE_MODELS = [
     pytest.param(ProjectedSphericalDiffusionModel, np.array([0.4, 2.1]), id="psdm"),
 ]
 
-INPUT_CONTRACT_XFAIL = pytest.mark.xfail(
-    strict=True,
-    reason="Fixed likelihood inputs are not normalized or validated yet.",
-)
-
 
 def _valid_arguments(theta: Any) -> dict[str, Any]:
     """Return one asymmetric, valid two-observation likelihood case."""
@@ -39,16 +34,15 @@ def _valid_arguments(theta: Any) -> dict[str, Any]:
 
 def _evaluate(
     model_type: ModelType,
-    theta: Any,
+    default_theta: Any,
     **overrides: Any,
 ) -> np.ndarray:
     """Evaluate a fixed likelihood after applying focused argument overrides."""
-    arguments = _valid_arguments(theta)
+    arguments = _valid_arguments(default_theta)
     arguments.update(overrides)
     return model_type(threshold_dynamic="fixed").joint_lpdf(**arguments)
 
 
-@INPUT_CONTRACT_XFAIL
 @pytest.mark.parametrize(("model_type", "theta"), FIXED_SINGLE_ANGLE_MODELS)
 def test_fixed_likelihood_accepts_python_array_likes(model_type, theta):
     expected = _evaluate(model_type, theta)
@@ -65,7 +59,6 @@ def test_fixed_likelihood_accepts_python_array_likes(model_type, theta):
     np.testing.assert_allclose(observed, expected, rtol=0.0, atol=0.0)
 
 
-@INPUT_CONTRACT_XFAIL
 @pytest.mark.parametrize(
     ("model_type", "theta"),
     [
@@ -87,7 +80,6 @@ def test_fixed_likelihood_accepts_one_scalar_observation(model_type, theta):
     assert np.isfinite(observed[0])
 
 
-@INPUT_CONTRACT_XFAIL
 @pytest.mark.parametrize(("model_type", "theta"), FIXED_SINGLE_ANGLE_MODELS)
 @pytest.mark.parametrize(
     ("overrides", "message"),
@@ -125,7 +117,6 @@ def test_fixed_likelihood_rejects_wrong_drift_dimension(model_type, theta):
         _evaluate(model_type, theta, drift_vec=np.ones((2, 3)))
 
 
-@INPUT_CONTRACT_XFAIL
 @pytest.mark.parametrize(("model_type", "theta"), FIXED_SINGLE_ANGLE_MODELS)
 @pytest.mark.parametrize(
     ("overrides", "message"),
@@ -161,7 +152,6 @@ def test_fixed_likelihood_rejects_invalid_parameter_domains(
         _evaluate(model_type, theta, **overrides)
 
 
-@INPUT_CONTRACT_XFAIL
 def test_fixed_psdm_rejects_negative_projected_drift_component():
     with pytest.raises(ValueError, match="drift_vec.*second component.*non-negative"):
         _evaluate(
@@ -171,7 +161,6 @@ def test_fixed_psdm_rejects_negative_projected_drift_component():
         )
 
 
-@INPUT_CONTRACT_XFAIL
 @pytest.mark.parametrize(("model_type", "theta"), FIXED_SINGLE_ANGLE_MODELS)
 @pytest.mark.parametrize(
     ("parameter", "unexpected_function"),
