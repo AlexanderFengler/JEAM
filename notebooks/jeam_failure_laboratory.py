@@ -228,8 +228,91 @@ def _(mo):
     $\sin(\theta_1)$, and HSDM includes
     $\sin^2(\theta_1)\sin(\theta_2)$. The panel compares JEAM pointwise with the
     independent surface-density oracle times that Jacobian, then integrates JEAM over
-    the complete angular domain.
+    the complete angular domain. The first table reconstructs the historical formula
+    without the Jacobian and places its mass ratio beside the corrected result for both
+    models.
     """)
+    return
+
+
+@app.cell
+def _(
+    HyperSphericalDiffusionModel,
+    SphericalDiffusionModel,
+    fixed_zero_drift_surface_density,
+    mo,
+    np,
+    pi,
+    trapezoid_mass,
+):
+    _comparison_time = 0.5
+    _comparison_cases = [
+        (
+            "SDM",
+            3,
+            SphericalDiffusionModel,
+            (np.linspace(0.0, pi, 101), np.linspace(-pi, pi, 2)),
+            4 * pi,
+        ),
+        (
+            "HSDM",
+            4,
+            HyperSphericalDiffusionModel,
+            (
+                np.linspace(0.0, pi, 101),
+                np.linspace(0.0, pi, 101),
+                np.linspace(-pi, pi, 2),
+            ),
+            2 * pi**2,
+        ),
+    ]
+    _comparison_rows = []
+    for _model_name, _dimension, _model_type, _axes, _surface_area in _comparison_cases:
+        _surface_density = float(
+            fixed_zero_drift_surface_density(_dimension, [_comparison_time])[0]
+        )
+        _angular_grid = np.meshgrid(*_axes, indexing="ij")
+        _angles = np.column_stack(
+            [_coordinate.ravel() for _coordinate in _angular_grid]
+        )
+        _corrected_density = np.exp(
+            _model_type().joint_lpdf(
+                rt=np.full(_angles.shape[0], _comparison_time),
+                theta=_angles,
+                drift_vec=np.zeros(_dimension),
+                ndt=0.0,
+                threshold=1.0,
+            )
+        ).reshape(_angular_grid[0].shape)
+        _historical_density = np.full_like(_corrected_density, _surface_density)
+        _expected_mass = _surface_area * _surface_density
+        _historical_ratio = trapezoid_mass(_historical_density, _axes) / _expected_mass
+        _corrected_ratio = trapezoid_mass(_corrected_density, _axes) / _expected_mass
+        _comparison_rows.append(
+            {
+                "Model": _model_name,
+                "Historical pre-fix mass ratio": _historical_ratio,
+                "Corrected JEAM mass ratio": _corrected_ratio,
+                "Expected ratio": 1.0,
+                "Resolution": (
+                    "RESOLVED"
+                    if abs(_corrected_ratio - 1.0) < 2e-4
+                    and abs(_historical_ratio - 1.0) > 0.1
+                    else "CHECK"
+                ),
+            }
+        )
+
+    mo.vstack(
+        [
+            mo.md(
+                "**Resolved defect at decision time 0.5.** The pre-fix column "
+                "reconstructs the audited implementation by integrating the independent "
+                "surface density directly over the exposed rectangular angle domain."
+            ),
+            mo.ui.table(_comparison_rows, pagination=False, selection=None),
+        ]
+    )
     return
 
 
