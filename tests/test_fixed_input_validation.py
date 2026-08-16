@@ -16,6 +16,21 @@ FIXED_SINGLE_ANGLE_MODELS = [
     pytest.param(ProjectedSphericalDiffusionModel, np.array([0.4, 2.1]), id="psdm"),
 ]
 
+VALID_FIXED_LPDF_CASES = [
+    pytest.param(
+        CircularDiffusionModel,
+        np.array([-0.4, 0.7]),
+        np.array([-1.6574672691113812, -1.3730854404331667]),
+        id="cdm",
+    ),
+    pytest.param(
+        ProjectedSphericalDiffusionModel,
+        np.array([0.4, 2.1]),
+        np.array([-0.66041957059783, -1.36600391907234]),
+        id="psdm",
+    ),
+]
+
 
 def _valid_arguments(theta: Any) -> dict[str, Any]:
     """Return one asymmetric, valid two-observation likelihood case."""
@@ -185,3 +200,44 @@ def test_fixed_likelihood_rejects_threshold_functions(
 ):
     with pytest.raises(ValueError, match=f"{parameter}.*fixed"):
         _evaluate(model_type, theta, **{parameter: unexpected_function})
+
+
+@pytest.mark.parametrize(("model_type", "theta", "expected"), VALID_FIXED_LPDF_CASES)
+def test_fixed_likelihood_preserves_valid_reference_values(
+    model_type,
+    theta,
+    expected,
+):
+    """Input hardening must not alter valid fixed-likelihood calculations."""
+    observed = _evaluate(model_type, theta)
+
+    np.testing.assert_allclose(observed, expected, rtol=1e-10, atol=1e-12)
+
+
+@pytest.mark.parametrize(("model_type", "theta"), FIXED_SINGLE_ANGLE_MODELS)
+def test_fixed_likelihood_broadcasts_shared_values(model_type, theta):
+    shared = _evaluate(model_type, theta, drift_vec=[0.45, 0.2], ndt=0.1)
+    trial_wise = _evaluate(
+        model_type,
+        theta,
+        drift_vec=[[0.45, 0.2], [0.45, 0.2]],
+        ndt=[0.1, 0.1],
+    )
+
+    np.testing.assert_allclose(shared, trial_wise, rtol=0.0, atol=0.0)
+
+
+@pytest.mark.parametrize(("model_type", "theta"), FIXED_SINGLE_ANGLE_MODELS)
+def test_fixed_likelihood_does_not_mutate_array_inputs(model_type, theta):
+    arguments = _valid_arguments(theta.copy())
+    arguments["drift_vec"] = np.array([[0.45, 0.2], [0.35, 0.25]])
+    originals = {
+        name: value.copy()
+        for name, value in arguments.items()
+        if isinstance(value, np.ndarray)
+    }
+
+    model_type(threshold_dynamic="fixed").joint_lpdf(**arguments)
+
+    for name, expected in originals.items():
+        np.testing.assert_array_equal(arguments[name], expected, err_msg=name)
