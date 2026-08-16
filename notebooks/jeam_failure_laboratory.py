@@ -57,7 +57,7 @@ def _(mo):
     invariants and will accumulate one focused panel as each defect is corrected.
 
     **Current scope:** preserve the independently verified fixed-boundary core, explain
-    the corrected standard and projected coordinate-density contracts, and keep every
+    the corrected density contracts and reproducible CDM simulator, and keep every
     remaining audited failure visible.
     """)
     return
@@ -123,10 +123,31 @@ def _(mo):
             "Status": "🔴 failing",
         },
         {
-            "Area": "API, RNG, and termination",
-            "Audit result": "Validation, reproducibility, and loop bounds are incomplete",
-            "Invariant": "Explicit domains, seeded simulation, bounded execution",
-            "Planned PR": "PR10–PR13",
+            "Area": "API and numerical errors",
+            "Audit result": "Validation and error policy remain incomplete",
+            "Invariant": "Explicit domains and distinct support/numerical failures",
+            "Planned PR": "PR10–PR11",
+            "Status": "🟠 pending",
+        },
+        {
+            "Area": "CDM simulation RNG",
+            "Audit result": "Generator state is injected through each CDM batch",
+            "Invariant": "Same seed reproduces without global RNG mutation",
+            "Planned PR": "PR12a",
+            "Status": "✅ protected",
+        },
+        {
+            "Area": "Other simulator RNG",
+            "Audit result": "Other model families still use process-global state",
+            "Invariant": "Apply the accepted CDM contract after scientific fixes",
+            "Planned PR": "PR12b",
+            "Status": "🟠 pending",
+        },
+        {
+            "Area": "Simulation termination",
+            "Audit result": "Custom boundaries have no non-crossing limit",
+            "Invariant": "Fail explicitly at a configured maximum time or step",
+            "Planned PR": "PR13",
             "Status": "🟠 pending",
         },
     ]
@@ -631,15 +652,146 @@ def _(mo):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## API domains, RNG, and termination
+    ## Reproducible CDM simulation
 
-    **Audit symptom:** advertised list inputs can fail before validation; impossible
-    observations and numerical failures share a finite floor; simulation has neither
-    injected RNG state nor a non-crossing-boundary limit.
+    **Audited defect:** the pre-fix CDM simulator exposed no `random_state` argument and
+    drew inside its compiled helper from process-global `np.random` state. Calling
+    `simulate(..., random_state=1947)` therefore raised `TypeError`; a caller could not
+    reproduce a complete batch through the public API.
 
-    **Independent oracle:** explicit input/output contracts, same-seed equality,
-    different-seed inequality, and a targeted termination exception. PR10–PR13 will
-    separate these concerns into reviewable panels.
+    **Corrected contract:** an integer seed or `numpy.random.Generator` is normalized at
+    the batch boundary and the same Generator stream is advanced across every trial.
+    The checks below compare complete outputs exactly and independently verify that the
+    legacy global NumPy state is unchanged.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    rng_seed_control = mo.ui.slider(
+        start=1,
+        stop=10_000,
+        step=1,
+        value=1947,
+        label="CDM seed",
+        show_value=True,
+    )
+    rng_seed_control
+    return (rng_seed_control,)
+
+
+@app.cell
+def _(CircularDiffusionModel, mo, np, rng_seed_control):
+    _seed = int(rng_seed_control.value)
+    _arguments = {
+        "drift_vec": np.array([0.7, -0.35]),
+        "ndt": 0.2,
+        "threshold": 0.45,
+        "s_v": 0.1,
+        "s_t": 0.05,
+        "sigma": 0.8,
+        "dt": 0.005,
+        "n_sample": 6,
+    }
+
+    _model = CircularDiffusionModel()
+    _first = _model.simulate(**_arguments, random_state=_seed)
+    _matching = _model.simulate(**_arguments, random_state=_seed)
+    _different = _model.simulate(**_arguments, random_state=_seed + 1)
+
+    _first_generator = np.random.default_rng(_seed)
+    _second_generator = np.random.default_rng(_seed)
+    _generator_first = _model.simulate(**_arguments, random_state=_first_generator)
+    _generator_matching = _model.simulate(**_arguments, random_state=_second_generator)
+    _generator_advanced = _model.simulate(**_arguments, random_state=_first_generator)
+
+    _original_legacy_state = np.random.get_state()
+    try:
+        np.random.seed(831)
+        _legacy_before = np.random.get_state()
+        _model.simulate(**_arguments, random_state=_seed)
+        _legacy_after = np.random.get_state()
+        _legacy_unchanged = (
+            _legacy_before[0] == _legacy_after[0]
+            and np.array_equal(_legacy_before[1], _legacy_after[1])
+            and _legacy_before[2:] == _legacy_after[2:]
+        )
+    finally:
+        np.random.set_state(_original_legacy_state)
+
+    _same_seed = _first.equals(_matching)
+    _different_seed = not _first.equals(_different)
+    _fresh_generators_match = _generator_first.equals(_generator_matching)
+    _reused_generator_advances = not _generator_first.equals(_generator_advanced)
+    _one_stream_per_batch = len(_first.drop_duplicates()) > 1
+
+    _rng_checks = [
+        {
+            "Invariant": "Public seed argument",
+            "Audited before PR12a": "TypeError: random_state was not accepted",
+            "Current result": "PASS" if _same_seed else "FAIL",
+        },
+        {
+            "Invariant": "Different integer seeds change the batch",
+            "Audited before PR12a": "No public seed contract",
+            "Current result": "PASS" if _different_seed else "FAIL",
+        },
+        {
+            "Invariant": "Fresh equal Generators reproduce",
+            "Audited before PR12a": "Generator injection unavailable",
+            "Current result": "PASS" if _fresh_generators_match else "FAIL",
+        },
+        {
+            "Invariant": "A reused Generator advances",
+            "Audited before PR12a": "Generator injection unavailable",
+            "Current result": "PASS" if _reused_generator_advances else "FAIL",
+        },
+        {
+            "Invariant": "One stream advances across batch trials",
+            "Audited before PR12a": "Process-global draws inside each helper",
+            "Current result": "PASS" if _one_stream_per_batch else "FAIL",
+        },
+        {
+            "Invariant": "Legacy np.random state is unchanged",
+            "Audited before PR12a": "Process-global RNG was the only source",
+            "Current result": "PASS" if _legacy_unchanged else "FAIL",
+        },
+    ]
+    _all_resolved = all(row["Current result"] == "PASS" for row in _rng_checks)
+
+    mo.vstack(
+        [
+            mo.callout(
+                "RESOLVED: all CDM RNG invariants pass."
+                if _all_resolved
+                else "UNRESOLVED: at least one CDM RNG invariant failed.",
+                kind="success" if _all_resolved else "danger",
+            ),
+            mo.ui.table(_rng_checks, pagination=False, selection=None),
+            mo.md("**Same-seed batch preview**"),
+            mo.ui.table(
+                _first.assign(
+                    matching_rt=_matching["rt"],
+                    matching_response=_matching["response"],
+                ),
+                pagination=False,
+                selection=None,
+            ),
+        ]
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## Remaining API and simulation safety work
+
+    List coercion and parameter validation remain assigned to PR10; support versus
+    numerical-error behavior remains assigned to PR11. PR12b will extend the accepted
+    RNG contract to other model families after their scientific fixes, and PR13 will add
+    a targeted exception for custom boundaries that never cross.
     """)
     return
 

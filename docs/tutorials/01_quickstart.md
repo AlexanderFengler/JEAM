@@ -58,7 +58,8 @@ sim_data = model.simulate(
     drift_vector,
     ndt,
     threshold,
-    n_sample=1000
+    n_sample=1000,
+    random_state=1947,
 )
 
 sim_data.head()
@@ -66,17 +67,20 @@ sim_data.head()
 
 |    |    rt |   response |
 |---:|------:|-----------:|
-|  0 | 0.623 |  -0.288496 |
-|  1 | 1.178 |  -0.213882 |
-|  2 | 2.552 |   0.710925 |
-|  3 | 0.894 |  -0.255075 |
-|  4 | 1.242 |  -0.152316 |
+|  0 | 1.137 |  -1.925305 |
+|  1 | 1.087 |   0.163647 |
+|  2 | 0.920 |   0.094132 |
+|  3 | 1.011 |   0.673868 |
+|  4 | 0.892 |   0.633614 |
 
 
 The simulated dataset contains:
 
 - `rt`: response times
-- `response`: continuous angular responses on the circle in radian
+- `response`: continuous angular responses in radians on `[-pi, pi)`
+
+Passing the same integer `random_state` with the same inputs reproduces the complete
+batch. See the usage guide for the stateful `numpy.random.Generator` form.
 
 ## 4. Visualizing simulated data
 
