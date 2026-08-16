@@ -126,6 +126,13 @@ def _scalar(value: Any, name: str) -> float:
     return result
 
 
+def normalize_log_density_floor(value: Any) -> float | None:
+    """Return an optional finite scalar log-density floor."""
+    if value is None:
+        return None
+    return _scalar(value, "log_density_floor")
+
+
 def _positive_scalar(value: Any, name: str) -> float:
     """Return one finite, strictly positive numeric scalar."""
     result = _scalar(value, name)

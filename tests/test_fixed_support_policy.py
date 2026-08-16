@@ -136,10 +136,6 @@ def test_fixed_psdm_enforces_closed_angle_domain_and_zero_density_at_poles():
     assert np.isfinite(observed[4])
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Optional fixed-likelihood floors are not implemented yet.",
-)
 @pytest.mark.parametrize(("model_type", "theta"), FIXED_MODELS)
 def test_fixed_likelihood_applies_opt_in_floor_after_strict_evaluation(
     model_type,
@@ -173,10 +169,6 @@ def test_fixed_likelihood_applies_opt_in_floor_after_strict_evaluation(
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Optional fixed-likelihood floors are not implemented yet.",
-)
 @pytest.mark.parametrize(("model_type", "theta"), FIXED_MODELS)
 @pytest.mark.parametrize(
     "floor",
@@ -221,10 +213,6 @@ def test_fixed_likelihood_raises_for_failed_first_passage_computation(
         _evaluate(model_type, theta)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Optional fixed-likelihood floors are not implemented yet.",
-)
 @pytest.mark.parametrize(
     ("model_type", "theta", "module", "long_function_name", "short_function_name"),
     FPT_IMPLEMENTATIONS,

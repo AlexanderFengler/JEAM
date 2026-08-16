@@ -5,7 +5,7 @@ from scipy.special import iv
 from ..utility.helpers import trapz_1d
 from ..utility.simulators import simulate_CDM_trial, simulate_custom_threshold_CDM_trial
 from ..utility.fpts import cdm_short_t_fpt_z, cdm_short_t_log_fpt_z, cdm_long_t_fpt_z, ie_fpt_linear, ie_fpt_exponential, ie_fpt_hyperbolic, ie_fpt_custom
-from ..utility.validation import fixed_fpt_log_density, normalize_fixed_single_angle_likelihood_inputs, validate_fixed_log_density
+from ..utility.validation import fixed_fpt_log_density, normalize_fixed_single_angle_likelihood_inputs, normalize_log_density_floor, validate_fixed_log_density
 
 class CircularDiffusionModel:
     '''
@@ -129,7 +129,7 @@ class CircularDiffusionModel:
         return pd.DataFrame(np.c_[RT, Choice], columns=['rt', 'response'])
 
 
-    def joint_lpdf(self, rt, theta, drift_vec, ndt, threshold, decay=0, threshold_function=None, dt_threshold_function=None, s_v=0, s_t=0, sigma=1, approximation_step=0.01):
+    def joint_lpdf(self, rt, theta, drift_vec, ndt, threshold, decay=0, threshold_function=None, dt_threshold_function=None, s_v=0, s_t=0, sigma=1, approximation_step=0.01, log_density_floor=None):
         '''
         Compute the joint log-probability density function of response time and choice angle
 
@@ -176,6 +176,8 @@ class CircularDiffusionModel:
         replaced with a finite density floor. The legacy ``s_t>0`` convolution branch
         is unchanged pending its dedicated support correction.
         '''
+
+        log_density_floor = normalize_log_density_floor(log_density_floor)
 
         if self.threshold_dynamic == 'fixed':
             inputs = normalize_fixed_single_angle_likelihood_inputs(
@@ -361,5 +363,8 @@ class CircularDiffusionModel:
         else:
             log_density[rt - ndt - s_t <= 0] = np.log(0.1**14)
             log_density = np.maximum(log_density, np.log(0.1**14))
-            
+
+        if log_density_floor is not None:
+            log_density = np.maximum(log_density, log_density_floor)
+
         return log_density
