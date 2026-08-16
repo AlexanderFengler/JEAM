@@ -4,8 +4,8 @@ from scipy.special import iv
 
 from ..utility.helpers import trapz_1d
 from ..utility.simulators import simulate_CDM_trial, simulate_custom_threshold_CDM_trial
-from ..utility.fpts import cdm_short_t_fpt_z, cdm_long_t_fpt_z, ie_fpt_linear, ie_fpt_exponential, ie_fpt_hyperbolic, ie_fpt_custom
-from ..utility.validation import normalize_fixed_single_angle_likelihood_inputs
+from ..utility.fpts import cdm_short_t_fpt_z, cdm_short_t_log_fpt_z, cdm_long_t_fpt_z, ie_fpt_linear, ie_fpt_exponential, ie_fpt_hyperbolic, ie_fpt_custom
+from ..utility.validation import fixed_fpt_log_density, normalize_fixed_single_angle_likelihood_inputs, validate_fixed_log_density
 
 class CircularDiffusionModel:
     '''
@@ -189,6 +189,11 @@ class CircularDiffusionModel:
             s_t = inputs.s_t
             sigma = inputs.sigma
             approximation_step = inputs.approximation_step
+            positive_density_support = (
+                (rt > ndt)
+                & (theta >= -np.pi)
+                & (theta < np.pi)
+            )
 
         if drift_vec.ndim == 1:
             drift_vec = drift_vec * np.ones((rt.shape[0], 2))
@@ -207,14 +212,29 @@ class CircularDiffusionModel:
                 s = tt/threshold**2
                 w = np.minimum(np.maximum((s - s0) / (s1 - s0), 0), 1)
                 fpt_lt = cdm_long_t_fpt_z(tt, threshold, sigma=sigma)
-                fpt_st = sigma**2/threshold**2 * cdm_short_t_fpt_z(sigma**2 * tt/threshold**2, sigma**2 * 0.1**8/threshold**2)   
+                scaled_tt = sigma**2 * tt/threshold**2
+                log_fpt_st = np.zeros_like(tt)
+                log_fpt_st[positive_density_support] = (
+                    np.log(sigma**2/threshold**2)
+                    + cdm_short_t_log_fpt_z(
+                        scaled_tt[positive_density_support],
+                        sigma**2 * 0.1**8/threshold**2,
+                    )
+                )
+                log_fpt_z = fixed_fpt_log_density(
+                    log_fpt_st,
+                    fpt_lt,
+                    w,
+                    positive_density_support,
+                    model_name="CDM",
+                )
             else:
                 T = np.arange(0, tt.max()+0.05, 0.05)
                 s = T/threshold**2
                 w = np.minimum(np.maximum((s - s0) / (s1 - s0), 0), 1)
                 fpt_lt = cdm_long_t_fpt_z(T, threshold, sigma=sigma)
                 fpt_st = sigma**2/threshold**2 * cdm_short_t_fpt_z(sigma**2 * T/threshold**2, sigma**2 * 0.1**8/threshold**2)   
-            fpt_z =  (1 - w) * fpt_st + w * fpt_lt
+                fpt_z =  (1 - w) * fpt_st + w * fpt_lt
         elif self.threshold_dynamic == 'linear':
             a = threshold - decay*tt
             T_max = min(rt.max(), threshold/decay)
@@ -235,7 +255,9 @@ class CircularDiffusionModel:
             g_z, T = ie_fpt_custom(threshold_function2, dt_threshold_function2, 2*sigma**2, 0.000001, sigma=2*sigma**2, dt=approximation_step, T_max=rt.max())
             fpt_z = np.interp(tt, T, g_z)
 
-        fpt_z = np.maximum(fpt_z, 0.1**14)
+        if self.threshold_dynamic != 'fixed' or s_t > 0:
+            fpt_z = np.maximum(fpt_z, 0.1**14)
+            log_fpt_z = np.log(fpt_z)
 
         # Girsanov:
         if s_v == 0:
@@ -247,7 +269,7 @@ class CircularDiffusionModel:
                 # No non-decision time variability
                 term1 = a * (mu_dot_x0 + mu_dot_x1) / sigma**2
                 term2 = 0.5 * (drift_vec[:, 0]**2 + drift_vec[:, 1]**2) * tt / sigma**2
-                log_density = term1 - term2 + np.log(fpt_z) - np.log(2*np.pi)
+                log_density = term1 - term2 + log_fpt_z - np.log(2*np.pi)
             else:
                 # With non-decision time variability
                 log_density = np.log(0.1**14) * np.ones(rt.shape[0])
@@ -286,7 +308,7 @@ class CircularDiffusionModel:
                 exponent0 = -0.5*drift_vec[:, 0]**2/s_v2 + 0.5*(x0 * s_v2/sigma**2 + drift_vec[:, 0])**2 / (s_v2 * (s_v2/sigma**2 * tt + 1))
                 exponent1 = -0.5*drift_vec[:, 1]**2/s_v2 + 0.5*(x1 * s_v2/sigma**2 + drift_vec[:, 1])**2 / (s_v2 * (s_v2/sigma**2 * tt + 1))
 
-                log_density = 2*np.log(fixed) + exponent0 + exponent1 + np.log(fpt_z) - np.log(2*np.pi)
+                log_density = 2*np.log(fixed) + exponent0 + exponent1 + log_fpt_z - np.log(2*np.pi)
             else:
                 # With non-decision time variability
                 log_density = np.log(0.1**14) * np.ones(rt.shape[0])
@@ -318,7 +340,15 @@ class CircularDiffusionModel:
                         if density > 0.1**14:
                             log_density[i] = np.log(density)
 
-        log_density[rt - ndt - s_t <= 0] = np.log(0.1**14)
-        log_density = np.maximum(log_density, np.log(0.1**14))
+        if self.threshold_dynamic == 'fixed' and s_t == 0:
+            validate_fixed_log_density(
+                log_density,
+                positive_density_support,
+                model_name="CDM",
+            )
+            log_density[~positive_density_support] = -np.inf
+        else:
+            log_density[rt - ndt - s_t <= 0] = np.log(0.1**14)
+            log_density = np.maximum(log_density, np.log(0.1**14))
             
         return log_density
