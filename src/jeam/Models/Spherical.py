@@ -5,8 +5,8 @@ from scipy.special import iv
 from ..utility.helpers import trapz_1d
 from ..utility.simulators import simulate_SDM_trial, simulate_custom_threshold_SDM_trial
 from ..utility.simulators import simulate_PSDM_trial, simulate_custom_threshold_PSDM_trial
-from ..utility.fpts import sdm_short_t_fpt_z, sdm_long_t_fpt_z, ie_fpt_linear, ie_fpt_exponential, ie_fpt_hyperbolic, ie_fpt_custom
-from ..utility.validation import normalize_fixed_single_angle_likelihood_inputs
+from ..utility.fpts import sdm_short_t_fpt_z, sdm_short_t_log_fpt_z, sdm_long_t_fpt_z, ie_fpt_linear, ie_fpt_exponential, ie_fpt_hyperbolic, ie_fpt_custom
+from ..utility.validation import fixed_fpt_log_density, normalize_fixed_single_angle_likelihood_inputs, normalize_log_density_floor, validate_fixed_log_density
 
 
 class SphericalDiffusionModel:
@@ -389,7 +389,7 @@ class ProjectedSphericalDiffusionModel:
 
         return pd.DataFrame(np.c_[RT, Choice], columns=['rt', 'response'])
     
-    def joint_lpdf(self, rt, theta, drift_vec, ndt, threshold, decay=0, threshold_function=None, dt_threshold_function=None, s_v=0, s_t=0, sigma=1, approximation_step=0.01):
+    def joint_lpdf(self, rt, theta, drift_vec, ndt, threshold, decay=0, threshold_function=None, dt_threshold_function=None, s_v=0, s_t=0, sigma=1, approximation_step=0.01, log_density_floor=None):
         '''
         Compute the joint log-probability density function of response time and choice angle
 
@@ -398,7 +398,9 @@ class ProjectedSphericalDiffusionModel:
         rt : array-like, shape (n_samples,)
             The response times
         theta : array-like, shape (n_samples,)
-            The choice angles in radians
+            The choice angles in radians. For a fixed threshold with ``s_t=0``,
+            the supported interval is ``[0, pi]``; the coordinate density is zero
+            at both poles.
         drift_vec : array-like, shape (2,) or (n_samples, 2)
             The drift vector [drift_x, drift_y]
         ndt : float or array-like, shape (n_samples,)
@@ -419,13 +421,30 @@ class ProjectedSphericalDiffusionModel:
             The diffusion coefficient (default is 1)
         approximation_step : float, optional
             The time step for numerical estimation of first-passage time densities (default is 0.01)
+        log_density_floor : float or None, optional
+            Optional finite lower bound for returned log densities. The default
+            ``None`` preserves strict support with negative infinity.
 
         Returns
         -------
         log_density : array-like, shape (n_samples,)
             The joint log-probability density with respect to the ordinary
-            coordinate measure d(rt) d(theta), where theta is in [0, pi]
+            coordinate measure ``d(rt) d(theta)``. For a fixed threshold with
+            ``s_t=0``, impossible observations return negative infinity unless
+            ``log_density_floor`` is supplied.
+
+        Notes
+        -----
+        Fixed-threshold inputs are normalized before evaluation. Invalid shapes or
+        parameters raise ``ValueError``. With ``s_t=0``, a failed numerical
+        computation on valid support raises ``FloatingPointError`` instead of being
+        replaced with a finite density floor. An explicit ``log_density_floor`` is
+        applied only after these checks and is an algorithmic approximation rather
+        than a normalized density. The legacy ``s_t>0`` convolution branch is
+        unchanged pending its dedicated support correction.
         '''
+
+        log_density_floor = normalize_log_density_floor(log_density_floor)
 
         if self.threshold_dynamic == 'fixed':
             inputs = normalize_fixed_single_angle_likelihood_inputs(
@@ -451,6 +470,11 @@ class ProjectedSphericalDiffusionModel:
             s_t = inputs.s_t
             sigma = inputs.sigma
             approximation_step = inputs.approximation_step
+            positive_density_support = (
+                (rt > ndt)
+                & (theta > 0)
+                & (theta < np.pi)
+            )
 
         if drift_vec.ndim == 1:
             drift_vec = drift_vec * np.ones((rt.shape[0], 2))
@@ -469,14 +493,29 @@ class ProjectedSphericalDiffusionModel:
                 s = tt/threshold**2
                 w = np.minimum(np.maximum((s - s0) / (s1 - s0), 0), 1)
                 fpt_lt = sdm_long_t_fpt_z(tt, threshold, sigma=sigma)
-                fpt_st = sigma**2/threshold**2 * sdm_short_t_fpt_z(sigma**2 * tt/threshold**2, sigma**2 * 0.1**8/threshold**2)   
+                scaled_tt = sigma**2 * tt/threshold**2
+                log_fpt_st = np.zeros_like(tt)
+                log_fpt_st[positive_density_support] = (
+                    np.log(sigma**2/threshold**2)
+                    + sdm_short_t_log_fpt_z(
+                        scaled_tt[positive_density_support],
+                        sigma**2 * 0.1**8/threshold**2,
+                    )
+                )
+                log_fpt_z = fixed_fpt_log_density(
+                    log_fpt_st,
+                    fpt_lt,
+                    w,
+                    positive_density_support,
+                    model_name="PSDM",
+                )
             else:
                 T = np.arange(0, tt.max()+0.05, 0.05)
                 s = T/threshold**2
                 w = np.minimum(np.maximum((s - s0) / (s1 - s0), 0), 1)
                 fpt_lt = sdm_long_t_fpt_z(T, threshold, sigma=sigma)
                 fpt_st = sigma**2/threshold**2 * sdm_short_t_fpt_z(sigma**2 * T/threshold**2, sigma**2 * 0.1**8/threshold**2)   
-            fpt_z =  (1 - w) * fpt_st + w * fpt_lt
+                fpt_z =  (1 - w) * fpt_st + w * fpt_lt
         elif self.threshold_dynamic == 'linear':
             a = threshold - decay*tt
             T_max = min(rt.max(), threshold/decay)
@@ -497,7 +536,9 @@ class ProjectedSphericalDiffusionModel:
             g_z, T = ie_fpt_custom(threshold_function2, dt_threshold_function2, 3*sigma**2, 0.000001, sigma=2*sigma**2, dt=approximation_step, T_max=rt.max())
             fpt_z = np.interp(tt, T, g_z)
 
-        fpt_z = np.maximum(fpt_z, 0.1**14)
+        if self.threshold_dynamic != 'fixed' or s_t > 0:
+            fpt_z = np.maximum(fpt_z, 0.1**14)
+            log_fpt_z = np.log(fpt_z)
 
         norm_mu = np.sqrt(drift_vec[:, 0]**2 + drift_vec[:, 1]**2)
         theta_mu = np.arctan2(drift_vec[:, 1], drift_vec[:, 0])
@@ -510,7 +551,7 @@ class ProjectedSphericalDiffusionModel:
                 term1 = np.exp(a/sigma**2 * norm_mu * np.cos(theta_mu) * np.cos(theta))
                 term2 = iv(0, a/sigma**2 * norm_mu * np.sin(theta_mu) * np.sin(theta))
                 term3 = -0.5 * norm_mu**2 * tt / sigma**2
-                log_density = np.log(2*np.pi) + np.log(term1) + np.log(term2) + term3 + np.log(fpt_z)
+                log_density = np.log(2*np.pi) + np.log(term1) + np.log(term2) + term3 + log_fpt_z
             else:
                 # With non-decision time variability
                 log_density = np.log(0.1**14) * np.ones(rt.shape[0])
@@ -565,7 +606,7 @@ class ProjectedSphericalDiffusionModel:
                 # log_density = np.log(term1) + np.log(term2) + np.log(term3) + np.log(fpt_z)
 
                 term3 = p1 + p2 - p3
-                log_density = np.log(term1) + np.log(term2) + term3 + np.log(fpt_z)
+                log_density = np.log(term1) + np.log(term2) + term3 + log_fpt_z
             else:
                 log_density = np.log(0.1**14) * np.ones(rt.shape[0])
                 eps = np.linspace(0, s_t, max(2, int(s_t//0.02)))
@@ -602,13 +643,29 @@ class ProjectedSphericalDiffusionModel:
                         if density > 0.1**14:
                                 log_density[i] = np.log(density)
 
-        valid_response_times = rt - ndt > 0
-        log_density[~valid_response_times] = np.log(0.1**14)
-        log_density = np.maximum(log_density, np.log(0.1**14))
-        with np.errstate(divide='ignore', invalid='ignore'):
-            log_density[valid_response_times] += (
-                -1.5*np.log(2*np.pi)
-                + np.log(np.sin(theta[valid_response_times]))
+        if self.threshold_dynamic == 'fixed' and s_t == 0:
+            with np.errstate(divide='ignore', invalid='ignore'):
+                log_density[positive_density_support] += (
+                    -1.5*np.log(2*np.pi)
+                    + np.log(np.sin(theta[positive_density_support]))
+                )
+            validate_fixed_log_density(
+                log_density,
+                positive_density_support,
+                model_name="PSDM",
             )
-            
+            log_density[~positive_density_support] = -np.inf
+        else:
+            valid_response_times = rt - ndt > 0
+            log_density[~valid_response_times] = np.log(0.1**14)
+            log_density = np.maximum(log_density, np.log(0.1**14))
+            with np.errstate(divide='ignore', invalid='ignore'):
+                log_density[valid_response_times] += (
+                    -1.5*np.log(2*np.pi)
+                    + np.log(np.sin(theta[valid_response_times]))
+                )
+
+        if log_density_floor is not None:
+            log_density = np.maximum(log_density, log_density_floor)
+
         return log_density

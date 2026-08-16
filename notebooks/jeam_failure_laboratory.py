@@ -26,6 +26,7 @@ def _():
         ProjectedSphericalDiffusionModel,
         SphericalDiffusionModel,
     )
+    from jeam.utility.validation import fixed_fpt_log_density
     from tests.numerical_diagnostics import (
         fixed_zero_drift_surface_density,
         trapezoid_mass,
@@ -38,6 +39,7 @@ def _():
         ProjectedHyperSphericalDiffusionModel,
         ProjectedSphericalDiffusionModel,
         SphericalDiffusionModel,
+        fixed_fpt_log_density,
         fixed_zero_drift_surface_density,
         mo,
         np,
@@ -57,8 +59,8 @@ def _(mo):
     invariants and will accumulate one focused panel as each defect is corrected.
 
     **Current scope:** preserve the independently verified fixed-boundary core, explain
-    the corrected density contracts and reproducible CDM simulator, and keep every
-    remaining audited failure visible.
+    the corrected density, fixed-likelihood error, and reproducible CDM simulator
+    contracts, and keep every remaining audited failure visible.
     """)
     return
 
@@ -124,10 +126,10 @@ def _(mo):
         },
         {
             "Area": "API and numerical errors",
-            "Audit result": "Validation and error policy remain incomplete",
+            "Audit result": "Fixed CDM/PSDM s_t=0 policy is explicit",
             "Invariant": "Explicit domains and distinct support/numerical failures",
-            "Planned PR": "PR10–PR11",
-            "Status": "🟠 pending",
+            "Planned PR": "F0-A1/F0-A2",
+            "Status": "✅ protected",
         },
         {
             "Area": "CDM simulation RNG",
@@ -652,6 +654,176 @@ def _(mo):
 @app.cell
 def _(mo):
     mo.md(r"""
+    ## Fixed CDM/PSDM support and numerical errors
+
+    **Audited defect:** fixed likelihoods used `log(1e-14)` for impossible data and
+    underflowed valid short-time densities to the same value. CDM also evaluated angles
+    periodically outside its advertised half-open interval, while invalid PSDM angles
+    could yield `NaN`. A failed first-passage or joint-density computation was not
+    distinguished reliably from these support cases.
+
+    **Corrected contract for `s_t=0`:** CDM uses $rt>ndt$ and
+    $\theta\in[-\pi,\pi)$; PSDM uses $rt>ndt$ and
+    $\theta\in[0,\pi]$, with zero coordinate density at its poles. Impossible data
+    return `-inf` by default, while an explicit finite `log_density_floor` supports
+    numerical workflows that need bounded log values. Valid short times stay in
+    analytical log space, invalid inputs raise `ValueError`, and failed computations
+    raise `FloatingPointError` before any floor is applied. A floored result is an
+    algorithmic approximation, not a normalized density. The separate `s_t>0`
+    leading-edge defect remains visible above and is not relabeled as impossible data
+    by this correction.
+    """)
+    return
+
+
+@app.cell
+def _(
+    CircularDiffusionModel,
+    ProjectedSphericalDiffusionModel,
+    fixed_fpt_log_density,
+    mo,
+    np,
+    pi,
+):
+    _historical_floor = float(np.log(1e-14))
+    _configured_floor = -66.1
+    _common = {
+        "drift_vec": np.array([0.45, 0.2]),
+        "ndt": 0.1,
+        "threshold": 1.2,
+        "s_v": 0.0,
+        "s_t": 0.0,
+        "sigma": 0.9,
+    }
+    _floored_common = _common | {"log_density_floor": _configured_floor}
+    _cdm_impossible = float(
+        CircularDiffusionModel().joint_lpdf(rt=0.1, theta=0.4, **_common)[0]
+    )
+    _cdm_impossible_floored = float(
+        CircularDiffusionModel().joint_lpdf(
+            rt=0.1,
+            theta=0.4,
+            **_floored_common,
+        )[0]
+    )
+    _cdm_upper_endpoint = float(
+        CircularDiffusionModel().joint_lpdf(rt=0.8, theta=pi, **_common)[0]
+    )
+    _cdm_upper_endpoint_floored = float(
+        CircularDiffusionModel().joint_lpdf(
+            rt=0.8,
+            theta=pi,
+            **_floored_common,
+        )[0]
+    )
+    _psdm_outside = float(
+        ProjectedSphericalDiffusionModel().joint_lpdf(
+            rt=0.8,
+            theta=pi + 0.01,
+            **_common,
+        )[0]
+    )
+    _psdm_outside_floored = float(
+        ProjectedSphericalDiffusionModel().joint_lpdf(
+            rt=0.8,
+            theta=pi + 0.01,
+            **_floored_common,
+        )[0]
+    )
+    _short_time = float(
+        CircularDiffusionModel().joint_lpdf(
+            rt=0.100001,
+            theta=0.4,
+            **(_common | {"drift_vec": np.zeros(2)}),
+        )[0]
+    )
+    _short_time_floored = float(
+        CircularDiffusionModel().joint_lpdf(
+            rt=0.100001,
+            theta=0.4,
+            **(_floored_common | {"drift_vec": np.zeros(2)}),
+        )[0]
+    )
+    try:
+        fixed_fpt_log_density(
+            np.array([0.0]),
+            np.array([np.nan]),
+            np.array([1.0]),
+            np.array([True]),
+            model_name="demonstration",
+        )
+    except FloatingPointError:
+        _numerical_failure = "FloatingPointError"
+    else:
+        _numerical_failure = "NO ERROR"
+
+    _policy_rows = [
+        {
+            "Case": "rt equals ndt",
+            "Historical behavior": _historical_floor,
+            "Strict default": _cdm_impossible,
+            "Opt-in floor (-66.1)": _cdm_impossible_floored,
+            "Expected": "-inf or configured floor",
+        },
+        {
+            "Case": "CDM theta equals +pi",
+            "Historical behavior": "finite periodic evaluation",
+            "Strict default": _cdm_upper_endpoint,
+            "Opt-in floor (-66.1)": _cdm_upper_endpoint_floored,
+            "Expected": "-inf or configured floor",
+        },
+        {
+            "Case": "PSDM theta exceeds pi",
+            "Historical behavior": "NaN",
+            "Strict default": _psdm_outside,
+            "Opt-in floor (-66.1)": _psdm_outside_floored,
+            "Expected": "-inf or configured floor",
+        },
+        {
+            "Case": "valid decision time = 1e-6",
+            "Historical behavior": _historical_floor,
+            "Strict default": _short_time,
+            "Opt-in floor (-66.1)": _short_time_floored,
+            "Expected": "analytical value or configured floor",
+        },
+        {
+            "Case": "NaN long-time FPT",
+            "Historical behavior": "not separated from density masking",
+            "Strict default": _numerical_failure,
+            "Opt-in floor (-66.1)": "not applied; error raised first",
+            "Expected": "FloatingPointError",
+        },
+    ]
+    _resolved = (
+        np.isneginf(_cdm_impossible)
+        and np.isneginf(_cdm_upper_endpoint)
+        and np.isneginf(_psdm_outside)
+        and np.isfinite(_short_time)
+        and _short_time < _configured_floor
+        and _cdm_impossible_floored == _configured_floor
+        and _cdm_upper_endpoint_floored == _configured_floor
+        and _psdm_outside_floored == _configured_floor
+        and _short_time_floored == _configured_floor
+        and _numerical_failure == "FloatingPointError"
+    )
+
+    mo.vstack(
+        [
+            mo.callout(
+                "RESOLVED: strict and optional floored modes are separated."
+                if _resolved
+                else "CHECK: at least one support/error invariant failed.",
+                kind="success" if _resolved else "danger",
+            ),
+            mo.ui.table(_policy_rows, pagination=False, selection=None),
+        ]
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
     ## Reproducible CDM simulation
 
     **Audited defect:** the pre-fix CDM simulator exposed no `random_state` argument and
@@ -786,12 +958,14 @@ def _(CircularDiffusionModel, mo, np, rng_seed_control):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## Remaining API and simulation safety work
+    ## Remaining simulation and wider likelihood work
 
-    List coercion and parameter validation remain assigned to PR10; support versus
-    numerical-error behavior remains assigned to PR11. PR12b will extend the accepted
-    RNG contract to other model families after their scientific fixes, and PR13 will add
-    a targeted exception for custom boundaries that never cross.
+    Fixed CDM/PSDM coercion and the `s_t=0` support/error policy are protected. The NDT
+    leading-edge panel above remains the authority for `s_t>0`; collapsing/custom
+    thresholds and the other model families keep their existing behavior until focused
+    follow-ups. PR12b will extend the accepted RNG contract to other families after their
+    scientific fixes, and PR13 will add a targeted exception for custom boundaries that
+    never cross.
     """)
     return
 

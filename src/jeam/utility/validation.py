@@ -126,6 +126,13 @@ def _scalar(value: Any, name: str) -> float:
     return result
 
 
+def normalize_log_density_floor(value: Any) -> float | None:
+    """Return an optional finite scalar log-density floor."""
+    if value is None:
+        return None
+    return _scalar(value, "log_density_floor")
+
+
 def _positive_scalar(value: Any, name: str) -> float:
     """Return one finite, strictly positive numeric scalar."""
     result = _scalar(value, name)
@@ -194,3 +201,81 @@ def normalize_fixed_single_angle_likelihood_inputs(
             approximation_step, "approximation_step"
         ),
     )
+
+
+def fixed_fpt_log_density(
+    short_log_density: FloatArray,
+    long_density: FloatArray,
+    blend_weight: FloatArray,
+    computation_mask: NDArray[np.bool_],
+    *,
+    model_name: str,
+) -> FloatArray:
+    """Combine fixed-model FPT branches while preserving short-time log mass."""
+    short_log_density = np.asarray(short_log_density)
+    long_density = np.asarray(long_density)
+    blend_weight = np.asarray(blend_weight)
+    log_density = np.zeros_like(short_log_density, dtype=np.float64)
+
+    short_only = computation_mask & (blend_weight == 0)
+    blended = computation_mask & (blend_weight > 0) & (blend_weight < 1)
+    long_only = computation_mask & (blend_weight == 1)
+
+    if np.any(~np.isfinite(short_log_density[short_only | blended])):
+        raise FloatingPointError(
+            f"{model_name} fixed first-passage density produced a non-finite "
+            "short-time value on valid response support."
+        )
+
+    log_density[short_only] = short_log_density[short_only]
+    with np.errstate(over="ignore", invalid="ignore"):
+        blended_short_density = np.exp(short_log_density[blended])
+        blended_density = (
+            np.exp(
+                np.log1p(-blend_weight[blended])
+                + short_log_density[blended]
+            )
+            + blend_weight[blended] * long_density[blended]
+        )
+
+    long_only_density = long_density[long_only]
+    if np.any(~np.isfinite(blended_density)):
+        raise FloatingPointError(
+            f"{model_name} fixed first-passage density produced a non-finite "
+            "blended value on valid response support."
+        )
+    if (
+        np.any(~np.isfinite(long_only_density))
+        or np.any(long_only_density <= 0)
+    ):
+        raise FloatingPointError(
+            f"{model_name} fixed first-passage density produced non-finite or "
+            "non-positive values on valid response support."
+        )
+
+    # The truncated long-time series is known to oscillate slightly below zero
+    # before its reliable region. In that overlap only, fall back to the valid
+    # short-time approximation instead of manufacturing a finite density floor.
+    stable_blended_density = np.where(
+        blended_density > 0,
+        blended_density,
+        blended_short_density,
+    )
+    log_density[blended] = np.log(stable_blended_density)
+    log_density[long_only] = np.log(long_only_density)
+    return log_density
+
+
+def validate_fixed_log_density(
+    log_density: FloatArray,
+    computation_mask: NDArray[np.bool_],
+    *,
+    model_name: str,
+) -> None:
+    """Raise when a fixed joint-density computation fails on valid support."""
+    computed_log_density = np.asarray(log_density)[computation_mask]
+    if np.any(~np.isfinite(computed_log_density)):
+        raise FloatingPointError(
+            f"{model_name} fixed joint density produced a non-finite value on "
+            "valid response support."
+        )

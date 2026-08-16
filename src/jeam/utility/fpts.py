@@ -14,6 +14,19 @@ def cdm_short_t_fpt_z(t, x):
     term2 = np.exp(-.5*(1-x)**2/t -  0.5*zeros_0[0]**2*t)
     return term1*term2
 
+
+@jit(nopython=True)
+def cdm_short_t_log_fpt_z(t, x):
+    """Evaluate the CDM short-time approximation without exponential underflow."""
+    return (
+        np.log1p(-x)
+        + 2 * np.log1p(t)
+        - 0.5 * np.log(x + t)
+        - 1.5 * np.log(t)
+        - 0.5 * (1 - x) ** 2 / t
+        - 0.5 * zeros_0[0] ** 2 * t
+    )
+
 # The firs-passage time distribution of zero-drift process
 @jit(nopython=True)
 def cdm_long_t_fpt_z(t, threshold, sigma=1):
@@ -45,6 +58,19 @@ def sdm_short_t_fpt_z(t, x):
     term1 = ((1 - x)*(1 + t)**2.5) / ((x + t) * t**1.5)
     term2 = np.exp(-.5*(1-x)**2/t -  0.5*np.pi**2*t)
     return term1*term2
+
+
+@jit(nopython=True)
+def sdm_short_t_log_fpt_z(t, x):
+    """Evaluate the SDM short-time approximation without exponential underflow."""
+    return (
+        np.log1p(-x)
+        + 2.5 * np.log1p(t)
+        - np.log(x + t)
+        - 1.5 * np.log(t)
+        - 0.5 * (1 - x) ** 2 / t
+        - 0.5 * np.pi**2 * t
+    )
 
 # The firs-passage time distribution of zero-drift process
 @jit(nopython=True)
