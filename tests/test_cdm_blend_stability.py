@@ -42,11 +42,16 @@ def _short_time_log_fpt(scaled_time: float) -> float:
 
 
 def _historical_blended_log_fpt(scaled_time: float) -> float:
-    """Reconstruct the pre-fix float64 blend without importing JEAM."""
+    """Reconstruct a positive pre-fix residue without platform-dependent sign.
+
+    Ordinary reductions leave a machine-scale residual whose sign depends on the
+    reduction order. The historical defect occurs for the positive sign, so take the
+    magnitude explicitly instead of making the regression architecture-dependent.
+    """
     roots = jn_zeros(0, 100)
     coefficients = roots / jv(1, roots)
     terms = coefficients * np.exp(-(roots**2) * scaled_time / 2.0)
-    long_density = sum(float(term) for term in terms)
+    long_density = abs(sum(float(term) for term in terms))
     blend_weight = np.clip((scaled_time - 0.002) / (0.02 - 0.002), 0.0, 1.0)
     short_density = np.exp(_short_time_log_fpt(scaled_time))
     blended_density = (1.0 - blend_weight) * short_density + blend_weight * long_density
