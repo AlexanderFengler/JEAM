@@ -13,7 +13,7 @@ import mpmath as mp
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.integrate import trapezoid
-from scipy.special import jn_zeros, jv
+from scipy.special import iv, jn_zeros, jv
 
 
 def trapezoid_mass(values: ArrayLike, axes: Sequence[ArrayLike]) -> float:
@@ -90,6 +90,46 @@ def fixed_zero_drift_surface_density(
     )
     surface_density = radial_series / (2 * pi) ** (dimension / 2)
     return surface_density.reshape(time_array.shape)
+
+
+def fixed_psdm_coordinate_density(
+    times: ArrayLike,
+    angles: ArrayLike,
+    drift_vec: ArrayLike,
+    *,
+    threshold: float = 1.0,
+    sigma: float = 1.0,
+) -> NDArray[np.float64]:
+    """Evaluate the fixed-PSDM density in its exposed polar coordinate.
+
+    This independent oracle combines the audited zero-drift Bessel surface density
+    with the ordinary polar Jacobian and the azimuth-integrated Girsanov factor. The
+    drift convention is ``(axial, projected_radial)`` with a nonnegative radial term.
+    """
+    time_array, angle_array = np.broadcast_arrays(
+        np.asarray(times, dtype=np.float64),
+        np.asarray(angles, dtype=np.float64),
+    )
+    drift = np.asarray(drift_vec, dtype=np.float64)
+    if drift.shape != (2,) or not np.all(np.isfinite(drift)):
+        raise ValueError("drift_vec must contain two finite values")
+    if drift[1] < 0:
+        raise ValueError("the projected radial drift must be nonnegative")
+    if np.any(time_array <= 0) or np.any((angle_array < 0) | (angle_array > pi)):
+        raise ValueError("times must be positive and angles must lie in [0, pi]")
+
+    zero_drift_surface = fixed_zero_drift_surface_density(
+        3,
+        time_array,
+        threshold=threshold,
+        sigma=sigma,
+    )
+    axial_drift, radial_drift = drift
+    angular_tilt = np.exp(
+        threshold * axial_drift * np.cos(angle_array) / sigma**2
+    ) * iv(0, threshold * radial_drift * np.sin(angle_array) / sigma**2)
+    time_tilt = np.exp(-0.5 * np.dot(drift, drift) * time_array / sigma**2)
+    return 2 * pi * zero_drift_surface * np.sin(angle_array) * angular_tilt * time_tilt
 
 
 def scaled_bessel_i_reference(
