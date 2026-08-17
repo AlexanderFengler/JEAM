@@ -309,7 +309,7 @@ class ProjectedSphericalDiffusionModel:
         else:
             raise ValueError("\'threshold_dynamic\' must be one of \'fixed\', \'linear\', \'exponential\', \'hyperbolic\', or \'custom\'. However, got \'{}\'".format(threshold_dynamic))
 
-    def simulate(self, drift_vec, ndt, threshold=1, decay=0, threshold_function=None, s_v=0, s_t=0, sigma=1, dt=0.001, n_sample=1, random_state: int | np.random.Generator | None = None):
+    def simulate(self, drift_vec, ndt, threshold=1, decay=0, threshold_function=None, s_v=0, s_t=0, sigma=1, dt=0.001, n_sample=1, max_time=20.0, random_state: int | np.random.Generator | None = None):
         '''
         Simulate response times and choices from the Projected Spherical Diffusion Model
 
@@ -335,6 +335,9 @@ class ProjectedSphericalDiffusionModel:
             Time step for the simulation (default is 0.001)
         n_sample : int, optional
             Number of samples to simulate (default is 1)
+        max_time : float, optional
+            Maximum evidence-accumulation time per trial. Trials that do not
+            reach the boundary return missing RT and response values. Default is 20.
         random_state : int, numpy.random.Generator, or None, optional
             Seed or random-number generator used for the complete simulated batch.
             Passing the same seed reproduces the batch; reusing a Generator advances
@@ -385,13 +388,13 @@ class ProjectedSphericalDiffusionModel:
                 RT[n], Choice[n] = simulate_PSDM_trial(threshold[n], drift_vec[n, :].astype(np.float64), ndt[n],
                                                        threshold_dynamic=self.threshold_dynamic,
                                                        decay=decay[n], s_v=s_v, s_t=s_t, sigma=sigma, dt=dt,
-                                                       random_state=rng)
+                                                       max_time=max_time, random_state=rng)
         else:
             for n in range(n_sample):
                 RT[n], Choice[n] = simulate_custom_threshold_PSDM_trial(threshold_function,
                                                                         drift_vec[n, :].astype(np.float64), ndt[n], 
                                                                         s_v=s_v, s_t=s_t, sigma=sigma, dt=dt,
-                                                                        random_state=rng)
+                                                                        max_time=max_time, random_state=rng)
 
         return pd.DataFrame(np.c_[RT, Choice], columns=['rt', 'response'])
     
