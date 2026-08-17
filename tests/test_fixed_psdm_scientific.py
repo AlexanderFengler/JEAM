@@ -5,6 +5,7 @@ from math import pi
 import numpy as np
 import pytest
 from scipy.integrate import cumulative_trapezoid, trapezoid
+from scipy.optimize import differential_evolution
 from scipy.special import iv
 
 from jeam.Models.Spherical import ProjectedSphericalDiffusionModel
@@ -182,4 +183,65 @@ def test_fixed_psdm_simulator_matches_likelihood_quantiles_and_moments():
     np.testing.assert_array_less(
         np.abs(observed_polar_moments - expected_polar_moments),
         4 * moment_standard_errors,
+    )
+
+
+@pytest.mark.slow
+def test_fixed_psdm_recovers_asymmetric_drift_threshold_and_ndt():
+    model = ProjectedSphericalDiffusionModel()
+    # Parameter order: axial drift, projected radial drift, threshold, NDT.
+    true_parameters = np.array([0.6, 1.0, 1.1, 0.2])
+    simulated = model.simulate(
+        drift_vec=true_parameters[:2],
+        ndt=true_parameters[3],
+        threshold=true_parameters[2],
+        sigma=1.0,
+        s_v=0.0,
+        s_t=0.0,
+        dt=0.0005,
+        n_sample=4_000,
+        random_state=4801,
+    )
+    rt = simulated["rt"].to_numpy()
+    response = simulated["response"].to_numpy()
+
+    def negative_log_likelihood(parameters):
+        log_density = model.joint_lpdf(
+            rt=rt,
+            theta=response,
+            drift_vec=parameters[:2],
+            ndt=parameters[3],
+            threshold=parameters[2],
+            sigma=1.0,
+            s_v=0.0,
+            s_t=0.0,
+        )
+        if not np.all(np.isfinite(log_density)):
+            return np.inf
+        return -float(np.sum(log_density))
+
+    bounds = [
+        (-0.5, 1.5),
+        (0.1, 2.0),
+        (0.6, 1.6),
+        (0.05, float(rt.min() - 1e-6)),
+    ]
+    recovery = differential_evolution(
+        negative_log_likelihood,
+        bounds=bounds,
+        seed=15,
+        maxiter=60,
+        popsize=8,
+        tol=1e-4,
+        polish=True,
+        workers=1,
+        updating="immediate",
+    )
+
+    assert recovery.success, recovery.message
+    assert recovery.fun <= negative_log_likelihood(true_parameters)
+    absolute_errors = np.abs(recovery.x - true_parameters)
+    np.testing.assert_array_less(
+        absolute_errors,
+        np.array([0.12, 0.15, 0.05, 0.015]),
     )
