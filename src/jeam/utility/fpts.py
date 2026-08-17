@@ -36,6 +36,20 @@ def cdm_long_t_fpt_z(t, threshold, sigma=1):
         fpt_z[i] = sigma**2/threshold**2 * series
     return fpt_z
 
+
+@jit(nopython=True)
+def cdm_long_t_fpt_z_roundoff_bound(t, threshold, sigma=1):
+    """Conservative float64 summation-error bound for the CDM Bessel series."""
+    bounds = np.zeros(t.shape)
+    n_terms = zeros_0.shape[0]
+    eps = np.finfo(np.float64).eps
+    gamma_n = n_terms * eps / (1 - n_terms * eps)
+    scale = sigma**2 / threshold**2
+    for i in range(t.shape[0]):
+        terms = (zeros_0/JVZ1) * np.exp(-(zeros_0**2 * sigma**2)/(2*threshold**2)*t[i])
+        bounds[i] = scale * gamma_n * np.sum(np.abs(terms))
+    return bounds
+
 # The firs-passage time distribution of zero-drift process for small RTs
 @jit(nopython=True)
 def hsdm_short_t_fpt_z(t, x):
