@@ -148,7 +148,23 @@ versions. It is not a promise of bitwise identity across arbitrary NumPy, Numba,
 or platform changes. This injected-RNG contract currently applies to the CDM and PSDM
 families; extension to the other model families remains part of their hardening work.
 
-## 5. Summary
+## 5. PSDM Termination and Omissions
+
+Every PSDM threshold mode has a finite evidence-accumulation horizon. The public model
+and both single-trial helpers accept `max_time`, which defaults to 20 seconds. This limit
+applies to decision time; non-decision time is added only when a trial reaches its
+boundary. If the last regular step would cross the horizon, JEAM shortens that step so
+the simulated path stops exactly at `max_time`.
+
+A trial that has not reached its boundary returns `NaN` for both `rt` and `response`.
+Batch simulation preserves that row in the returned DataFrame. This pair is an explicit
+omission value rather than an in-support numerical sentinel; callers may retain it as an
+omission, construct a mask, or drop it according to their analysis protocol.
+
+Both `dt` and `max_time` must be finite and strictly positive. Invalid values raise a
+`ValueError` before simulation starts.
+
+## 6. Summary
 
 JEAM is appropriate when:
 
