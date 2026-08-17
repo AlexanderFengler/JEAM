@@ -4,11 +4,68 @@ from math import pi
 
 import numpy as np
 import pytest
-from scipy.integrate import trapezoid
+from scipy.integrate import cumulative_trapezoid, trapezoid
 from scipy.special import iv
 
 from jeam.Models.Spherical import ProjectedSphericalDiffusionModel
 from tests.numerical_diagnostics import fixed_psdm_coordinate_density
+
+
+def _fixed_likelihood_reference_summary(
+    model,
+    *,
+    drift,
+    threshold,
+    sigma,
+    ndt,
+    quantile_probabilities,
+):
+    """Obtain RT quantiles and polar moments from normalized likelihood slices."""
+    decision_times = np.linspace(1e-6, 12.0, 60_000)
+    reference_angle = pi / 2
+    joint_time_slice = np.exp(
+        model.joint_lpdf(
+            rt=decision_times + ndt,
+            theta=np.full(decision_times.size, reference_angle),
+            drift_vec=drift,
+            ndt=ndt,
+            threshold=threshold,
+            sigma=sigma,
+        )
+    )
+    rt_density = joint_time_slice / trapezoid(joint_time_slice, x=decision_times)
+    rt_cdf = cumulative_trapezoid(
+        rt_density,
+        x=decision_times,
+        initial=0.0,
+    )
+    rt_cdf /= rt_cdf[-1]
+    rt_quantiles = np.interp(quantile_probabilities, rt_cdf, decision_times) + ndt
+    density_at_quantiles = np.interp(
+        rt_quantiles - ndt,
+        decision_times,
+        rt_density,
+    )
+
+    angles = np.linspace(0.0, pi, 4_001)
+    joint_angle_slice = np.exp(
+        model.joint_lpdf(
+            rt=np.full(angles.size, ndt + 0.5),
+            theta=angles,
+            drift_vec=drift,
+            ndt=ndt,
+            threshold=threshold,
+            sigma=sigma,
+        )
+    )
+    angle_density = joint_angle_slice / trapezoid(joint_angle_slice, x=angles)
+    polar_moments = np.array(
+        [
+            trapezoid(np.cos(angles) ** power * angle_density, x=angles)
+            for power in (1, 2)
+        ]
+    )
+    return rt_quantiles, density_at_quantiles, polar_moments
 
 
 def test_fixed_psdm_matches_independent_asymmetric_drift_oracle():
@@ -70,3 +127,59 @@ def test_fixed_psdm_asymmetric_density_integrates_to_one():
     )
 
     assert mass == pytest.approx(1.0, abs=1e-5)
+
+
+def test_fixed_psdm_simulator_matches_likelihood_quantiles_and_moments():
+    model = ProjectedSphericalDiffusionModel()
+    drift = np.array([0.6, 1.0])
+    threshold = 1.1
+    sigma = 0.9
+    ndt = 0.2
+    quantile_probabilities = np.array([0.1, 0.5, 0.9])
+    n_sample = 30_000
+    simulation_step = 0.0005
+
+    expected_quantiles, density_at_quantiles, expected_polar_moments = (
+        _fixed_likelihood_reference_summary(
+            model,
+            drift=drift,
+            threshold=threshold,
+            sigma=sigma,
+            ndt=ndt,
+            quantile_probabilities=quantile_probabilities,
+        )
+    )
+    simulated = model.simulate(
+        drift_vec=drift,
+        ndt=ndt,
+        threshold=threshold,
+        sigma=sigma,
+        dt=simulation_step,
+        n_sample=n_sample,
+        random_state=1947,
+    )
+
+    assert not simulated.isna().any().any()
+    observed_quantiles = np.quantile(simulated["rt"], quantile_probabilities)
+    quantile_standard_errors = (
+        np.sqrt(quantile_probabilities * (1 - quantile_probabilities) / n_sample)
+        / density_at_quantiles
+    )
+    # Four Monte Carlo standard errors plus one reporting time step keeps the gate
+    # sensitive to scientific drift while accounting for the Euler time grid.
+    quantile_error_budget = 4 * quantile_standard_errors + simulation_step
+    np.testing.assert_array_less(
+        np.abs(observed_quantiles - expected_quantiles),
+        quantile_error_budget,
+    )
+
+    cosine = np.cos(simulated["response"].to_numpy())
+    observed_polar_statistics = np.column_stack((cosine, cosine**2))
+    observed_polar_moments = observed_polar_statistics.mean(axis=0)
+    moment_standard_errors = observed_polar_statistics.std(axis=0, ddof=1) / np.sqrt(
+        n_sample
+    )
+    np.testing.assert_array_less(
+        np.abs(observed_polar_moments - expected_polar_moments),
+        4 * moment_standard_errors,
+    )
