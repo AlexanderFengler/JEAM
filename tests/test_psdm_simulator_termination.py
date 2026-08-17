@@ -7,17 +7,19 @@ from jeam.utility.simulators import (
     simulate_PSDM_trial,
 )
 
-pytestmark = pytest.mark.xfail(
-    strict=True,
-    reason="PSDM does not yet expose a finite simulation horizon",
+
+@pytest.mark.parametrize(
+    "threshold_dynamic", ["fixed", "linear", "exponential", "hyperbolic"]
 )
-
-
-def test_fixed_helper_returns_nan_pair_when_the_boundary_is_not_reached():
+def test_builtin_helper_returns_nan_pair_when_the_boundary_is_not_reached(
+    threshold_dynamic,
+):
     rt, response = simulate_PSDM_trial(
         threshold=1.0,
         drift_vec=np.array([0.0, 0.0]),
         ndt=0.2,
+        threshold_dynamic=threshold_dynamic,
+        decay=0.2,
         sigma=0.0,
         dt=0.01,
         max_time=0.03,
@@ -73,6 +75,12 @@ def test_horizon_does_not_change_a_completed_seeded_trial():
     default_horizon = simulate_PSDM_trial(**arguments)
     explicit_horizon = simulate_PSDM_trial(**arguments, max_time=20.0)
 
+    np.testing.assert_allclose(
+        default_horizon,
+        (0.41500000000000015, 1.3586944568046324),
+        rtol=1e-13,
+        atol=1e-15,
+    )
     assert default_horizon == explicit_horizon
 
 

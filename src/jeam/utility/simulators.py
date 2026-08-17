@@ -414,6 +414,13 @@ def simulate_custom_threshold_HSDM_trial(threshold_function, drift_vec, ndt, s_v
 
     return ndt_t+rt, (theta1, theta2, theta3)
 
+def _validate_simulation_horizon(dt, max_time):
+    if not np.isfinite(dt) or dt <= 0:
+        raise ValueError("dt must be a finite positive number")
+    if not np.isfinite(max_time) or max_time <= 0:
+        raise ValueError("max_time must be a finite positive number")
+
+
 def simulate_PSDM_trial(
     threshold,
     drift_vec,
@@ -424,6 +431,7 @@ def simulate_PSDM_trial(
     s_t=0,
     sigma=1,
     dt=0.001,
+    max_time=20.0,
     random_state: int | np.random.Generator | None = None,
 ):
     '''
@@ -449,6 +457,9 @@ def simulate_PSDM_trial(
         Diffusion coefficient (standard deviation of the diffusion process). Default is 1.
     dt : float, optional
         Time step for the simulation. Default is 0.001. 
+    max_time : float, optional
+        Maximum evidence-accumulation time. An omitted trial returns ``(nan, nan)``.
+        Default is 20.
     random_state : int, numpy.random.Generator, or None, optional
         Seed or random-number generator used for simulation. Default is None.
 
@@ -459,6 +470,7 @@ def simulate_PSDM_trial(
     theta : float
         Response angle between [0, pi]
     '''
+    _validate_simulation_horizon(dt, max_time)
     rng = np.random.default_rng(random_state)
     return _simulate_PSDM_trial(
         threshold,
@@ -470,13 +482,15 @@ def simulate_PSDM_trial(
         s_t,
         sigma,
         dt,
+        max_time,
         rng,
     )
 
 
 @jit(nopython=True)
 def _simulate_PSDM_trial(
-    threshold, drift_vec, ndt, threshold_dynamic, decay, s_v, s_t, sigma, dt, rng
+    threshold, drift_vec, ndt, threshold_dynamic, decay, s_v, s_t, sigma, dt,
+    max_time, rng
 ):
     x = np.zeros((3,))
     muz = drift_vec[0]
@@ -503,21 +517,33 @@ def _simulate_PSDM_trial(
         ndt_t = ndt
 
     if threshold_dynamic == 'fixed':
-        while np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold:
-            x += mu_t*dt + sigma*np.sqrt(dt)*rng.standard_normal(3)
-            rt += dt
+        while np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold and rt < max_time:
+            step_dt = min(dt, max_time - rt)
+            x += mu_t*step_dt + sigma*np.sqrt(step_dt)*rng.standard_normal(3)
+            rt += step_dt
+        if np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold:
+            return np.nan, np.nan
     elif threshold_dynamic == 'linear':
-        while np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold - decay*rt:
-            x += mu_t*dt + sigma*np.sqrt(dt)*rng.standard_normal(3)
-            rt += dt
+        while np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold - decay*rt and rt < max_time:
+            step_dt = min(dt, max_time - rt)
+            x += mu_t*step_dt + sigma*np.sqrt(step_dt)*rng.standard_normal(3)
+            rt += step_dt
+        if np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold - decay*rt:
+            return np.nan, np.nan
     elif threshold_dynamic == 'exponential':
-        while np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold * np.exp(-decay*rt):
-            x += mu_t*dt + sigma*np.sqrt(dt)*rng.standard_normal(3)
-            rt += dt
+        while np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold * np.exp(-decay*rt) and rt < max_time:
+            step_dt = min(dt, max_time - rt)
+            x += mu_t*step_dt + sigma*np.sqrt(step_dt)*rng.standard_normal(3)
+            rt += step_dt
+        if np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold * np.exp(-decay*rt):
+            return np.nan, np.nan
     elif threshold_dynamic == 'hyperbolic':
-        while np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold / (1 + decay*rt):
-            x += mu_t*dt + sigma*np.sqrt(dt)*rng.standard_normal(3)
-            rt += dt
+        while np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold / (1 + decay*rt) and rt < max_time:
+            step_dt = min(dt, max_time - rt)
+            x += mu_t*step_dt + sigma*np.sqrt(step_dt)*rng.standard_normal(3)
+            rt += step_dt
+        if np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold / (1 + decay*rt):
+            return np.nan, np.nan
     
     theta = np.arctan2(np.sqrt(x[0]**2 + x[1]**2), x[2])    
     
@@ -531,6 +557,7 @@ def simulate_custom_threshold_PSDM_trial(
     s_t=0,
     sigma=1,
     dt=0.001,
+    max_time=20.0,
     random_state: int | np.random.Generator | None = None,
 ):
     '''
@@ -552,6 +579,9 @@ def simulate_custom_threshold_PSDM_trial(
         Diffusion coefficient (standard deviation of the diffusion process). Default is 1.
     dt : float, optional
         Time step for the simulation. Default is 0.001. 
+    max_time : float, optional
+        Maximum evidence-accumulation time. An omitted trial returns ``(nan, nan)``.
+        Default is 20.
     random_state : int, numpy.random.Generator, or None, optional
         Seed or random-number generator used for simulation. Default is None.
 
@@ -562,6 +592,7 @@ def simulate_custom_threshold_PSDM_trial(
     theta : float
         Response angle between [0, pi]
     '''
+    _validate_simulation_horizon(dt, max_time)
     rng = np.random.default_rng(random_state)
     x = np.zeros((3,))
     muz = drift_vec[0]
@@ -587,10 +618,13 @@ def simulate_custom_threshold_PSDM_trial(
     else:
         ndt_t = ndt
 
-    while np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold_function(rt):
-        x += mu_t*dt + sigma*np.sqrt(dt)*rng.standard_normal(3)
-        
-        rt += dt
+    while np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold_function(rt) and rt < max_time:
+        step_dt = min(dt, max_time - rt)
+        x += mu_t*step_dt + sigma*np.sqrt(step_dt)*rng.standard_normal(3)
+        rt += step_dt
+
+    if np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold_function(rt):
+        return np.nan, np.nan
 
     theta = np.arctan2(np.sqrt(x[0]**2 + x[1]**2), x[2])    
     
