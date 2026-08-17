@@ -414,8 +414,18 @@ def simulate_custom_threshold_HSDM_trial(threshold_function, drift_vec, ndt, s_v
 
     return ndt_t+rt, (theta1, theta2, theta3)
 
-@jit(nopython=True)
-def simulate_PSDM_trial(threshold, drift_vec, ndt, threshold_dynamic='fixed', decay=0, s_v=0, s_t=0, sigma=1, dt=0.001):
+def simulate_PSDM_trial(
+    threshold,
+    drift_vec,
+    ndt,
+    threshold_dynamic='fixed',
+    decay=0,
+    s_v=0,
+    s_t=0,
+    sigma=1,
+    dt=0.001,
+    random_state: int | np.random.Generator | None = None,
+):
     '''
     Simulate a single trial of the projected spherical diffusion model (PSDM).
 
@@ -439,6 +449,8 @@ def simulate_PSDM_trial(threshold, drift_vec, ndt, threshold_dynamic='fixed', de
         Diffusion coefficient (standard deviation of the diffusion process). Default is 1.
     dt : float, optional
         Time step for the simulation. Default is 0.001. 
+    random_state : int, numpy.random.Generator, or None, optional
+        Seed or random-number generator used for simulation. Default is None.
 
     Returns
     -------
@@ -447,6 +459,25 @@ def simulate_PSDM_trial(threshold, drift_vec, ndt, threshold_dynamic='fixed', de
     theta : float
         Response angle between [0, pi]
     '''
+    rng = np.random.default_rng(random_state)
+    return _simulate_PSDM_trial(
+        threshold,
+        drift_vec,
+        ndt,
+        threshold_dynamic,
+        decay,
+        s_v,
+        s_t,
+        sigma,
+        dt,
+        rng,
+    )
+
+
+@jit(nopython=True)
+def _simulate_PSDM_trial(
+    threshold, drift_vec, ndt, threshold_dynamic, decay, s_v, s_t, sigma, dt, rng
+):
     x = np.zeros((3,))
     muz = drift_vec[0]
     eta = drift_vec[1]
@@ -462,37 +493,46 @@ def simulate_PSDM_trial(threshold, drift_vec, ndt, threshold_dynamic='fixed', de
     mu = np.array([mux, muy, muz])
 
     if s_v>0:
-        mu_t = mu + s_v*np.random.randn(3)
+        mu_t = mu + s_v*rng.standard_normal(3)
     else:
         mu_t = mu
 
     if s_t>0:
-        ndt_t = ndt + s_t*np.random.rand()
+        ndt_t = ndt + s_t*rng.random()
     else:
         ndt_t = ndt
 
     if threshold_dynamic == 'fixed':
         while np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold:
-            x += mu_t*dt + sigma*np.sqrt(dt)*np.random.randn(3)
+            x += mu_t*dt + sigma*np.sqrt(dt)*rng.standard_normal(3)
             rt += dt
     elif threshold_dynamic == 'linear':
         while np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold - decay*rt:
-            x += mu_t*dt + sigma*np.sqrt(dt)*np.random.randn(3)
+            x += mu_t*dt + sigma*np.sqrt(dt)*rng.standard_normal(3)
             rt += dt
     elif threshold_dynamic == 'exponential':
         while np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold * np.exp(-decay*rt):
-            x += mu_t*dt + sigma*np.sqrt(dt)*np.random.randn(3)
+            x += mu_t*dt + sigma*np.sqrt(dt)*rng.standard_normal(3)
             rt += dt
     elif threshold_dynamic == 'hyperbolic':
         while np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold / (1 + decay*rt):
-            x += mu_t*dt + sigma*np.sqrt(dt)*np.random.randn(3)
+            x += mu_t*dt + sigma*np.sqrt(dt)*rng.standard_normal(3)
             rt += dt
     
     theta = np.arctan2(np.sqrt(x[0]**2 + x[1]**2), x[2])    
     
     return ndt_t+rt, theta
 
-def simulate_custom_threshold_PSDM_trial(threshold_function, drift_vec, ndt, s_v=0, s_t=0, sigma=1, dt=0.001):
+def simulate_custom_threshold_PSDM_trial(
+    threshold_function,
+    drift_vec,
+    ndt,
+    s_v=0,
+    s_t=0,
+    sigma=1,
+    dt=0.001,
+    random_state: int | np.random.Generator | None = None,
+):
     '''
     Simulate a single trial of the projected spherical diffusion model (PSDM) with a user defined threshold function.
 
@@ -512,6 +552,8 @@ def simulate_custom_threshold_PSDM_trial(threshold_function, drift_vec, ndt, s_v
         Diffusion coefficient (standard deviation of the diffusion process). Default is 1.
     dt : float, optional
         Time step for the simulation. Default is 0.001. 
+    random_state : int, numpy.random.Generator, or None, optional
+        Seed or random-number generator used for simulation. Default is None.
 
     Returns
     -------
@@ -520,6 +562,7 @@ def simulate_custom_threshold_PSDM_trial(threshold_function, drift_vec, ndt, s_v
     theta : float
         Response angle between [0, pi]
     '''
+    rng = np.random.default_rng(random_state)
     x = np.zeros((3,))
     muz = drift_vec[0]
     eta = drift_vec[1]
@@ -535,17 +578,17 @@ def simulate_custom_threshold_PSDM_trial(threshold_function, drift_vec, ndt, s_v
     mu = np.array([mux, muy, muz])
 
     if s_v>0:
-        mu_t = mu + s_v*np.random.randn(3)
+        mu_t = mu + s_v*rng.standard_normal(3)
     else:
         mu_t = mu
 
     if s_t>0:
-        ndt_t = ndt + s_t*np.random.rand()
+        ndt_t = ndt + s_t*rng.random()
     else:
         ndt_t = ndt
 
     while np.sqrt(x[0]**2 + x[1]**2 + x[2]**2) < threshold_function(rt):
-        x += mu_t*dt + sigma*np.sqrt(dt)*np.random.randn(3)
+        x += mu_t*dt + sigma*np.sqrt(dt)*rng.standard_normal(3)
         
         rt += dt
 
